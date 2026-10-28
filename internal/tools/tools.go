@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -100,8 +102,12 @@ func Register(s *mcp.Server, svc Service, lib *library.Store) {
 
 	mcp.AddTool(s, &mcp.Tool{Name: "muse_chat", Description: descChat},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in chatIn) (*mcp.CallToolResult, muse.Result, error) {
+			files, err := checkFiles(in.Attachments)
+			if err != nil {
+				return nil, muse.Result{}, err
+			}
 			res, err := svc.Chat(ctx, muse.ChatRequest{Message: in.Message, ChatID: in.ChatID,
-				Attachments: in.Attachments, SaveImagesTo: in.SaveImagesTo})
+				Attachments: files, SaveImagesTo: in.SaveImagesTo})
 			return nil, res, err
 		})
 
@@ -165,6 +171,27 @@ func buildImageRequest(lib *library.Store, in generateIn) (muse.ImageRequest, er
 		return muse.ImageRequest{}, err
 	}
 	return muse.ImageRequest{Text: built.Text, Attachments: built.Attachments, OutputPath: in.OutputPath}, nil
+}
+
+// checkFiles requires every chat attachment to be an existing regular file
+// and returns their absolute paths.
+func checkFiles(paths []string) ([]string, error) {
+	var abs []string
+	for _, p := range paths {
+		a, err := filepath.Abs(p)
+		if err != nil {
+			return nil, fmt.Errorf("attachment %q: %w", p, err)
+		}
+		fi, err := os.Stat(a)
+		if err != nil {
+			return nil, fmt.Errorf("attachment %q: %w", p, err)
+		}
+		if !fi.Mode().IsRegular() {
+			return nil, fmt.Errorf("attachment %q is not a file", p)
+		}
+		abs = append(abs, a)
+	}
+	return abs, nil
 }
 
 func getRef(lib *library.Store, name string, kind library.Kind) (library.Ref, error) {

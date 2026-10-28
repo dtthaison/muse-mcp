@@ -12,7 +12,7 @@ import (
 func touch(t *testing.T, dir, name string) string {
 	t.Helper()
 	p := filepath.Join(dir, name)
-	if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+	if err := os.WriteFile(p, []byte("\x89PNG\r\n\x1a\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return p
@@ -127,5 +127,18 @@ func TestRelativeReferenceMadeAbsolute(t *testing.T) {
 	}
 	if !filepath.IsAbs(b.Attachments[0]) || filepath.Base(b.Attachments[0]) != "x.png" {
 		t.Fatalf("got %q", b.Attachments[0])
+	}
+}
+
+func TestAdHocReferenceMustBeImage(t *testing.T) {
+	dir := t.TempDir()
+	txt := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(txt, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{txt, dir} {
+		if _, err := Build(Input{Prompt: "p", References: []string{p}}); err == nil || !strings.Contains(err.Error(), p) {
+			t.Fatalf("%s: err = %v", p, err)
+		}
 	}
 }

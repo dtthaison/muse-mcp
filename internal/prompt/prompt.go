@@ -6,7 +6,6 @@ package prompt
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -71,7 +70,7 @@ func Build(in Input) (Built, error) {
 		if err != nil {
 			return Built{}, fmt.Errorf("reference image %q: %w", p, err)
 		}
-		if _, err := os.Stat(abs); err != nil {
+		if err := library.CheckImage(abs); err != nil {
 			return Built{}, fmt.Errorf("reference image %q: %w", p, err)
 		}
 		note := ""

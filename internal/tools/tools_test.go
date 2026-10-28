@@ -220,3 +220,25 @@ func TestServiceErrorsSurfaceAsToolErrors(t *testing.T) {
 		t.Fatalf("isError=%v text=%q", res.IsError, text)
 	}
 }
+
+func TestChatAttachmentsChecked(t *testing.T) {
+	svc, _, cs := setup(t)
+	dir := t.TempDir()
+	for _, a := range []string{filepath.Join(dir, "nope.pdf"), dir} {
+		res, text := call(t, cs, "muse_chat", map[string]any{"message": "hi", "attachments": []string{a}})
+		if !res.IsError || !strings.Contains(text, a) {
+			t.Fatalf("%s: isError=%v text=%q", a, res.IsError, text)
+		}
+	}
+	if len(svc.chats) != 0 {
+		t.Fatalf("service called %d times", len(svc.chats))
+	}
+	pngFile(t, dir, "a.png")
+	t.Chdir(dir)
+	if res, text := call(t, cs, "muse_chat", map[string]any{"message": "hi", "attachments": []string{"a.png"}}); res.IsError {
+		t.Fatal(text)
+	}
+	if got := svc.chats[0].Attachments; len(got) != 1 || got[0] != filepath.Join(dir, "a.png") {
+		t.Fatalf("attachments %q", got)
+	}
+}
