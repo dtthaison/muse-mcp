@@ -11,8 +11,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/chromedp/cdproto/cdp"
+	"github.com/chromedp/cdproto/target"
+	"github.com/chromedp/chromedp"
 
 	"pp/muse-mcp/internal/browser"
 	"pp/muse-mcp/internal/chats"
@@ -25,7 +30,8 @@ func fastTiming() Timing {
 		ImageTimeout: 3 * time.Second, ImageMax: 6 * time.Second, ImageSettle: 300 * time.Millisecond,
 		TextOnlyGrace: 500 * time.Millisecond, ChatTimeout: 3 * time.Second, ChatMax: 6 * time.Second,
 		// ChatForcePolls is ~18s in production (12 × 1.5s); 100 × 50ms keeps a comparable window.
-		ChatStable: 300 * time.Millisecond, ChatForcePolls: 100, ApprovalTimeout: 5 * time.Second}
+		ChatStable: 300 * time.Millisecond, ChatForcePolls: 100, ApprovalTimeout: 5 * time.Second,
+		Unresponsive: time.Second}
 }
 
 type fixture struct {
@@ -319,5 +325,102 @@ func TestRelaunchDropsPending(t *testing.T) {
 	}
 	if st, _ := f.svc.Status(context.Background()); len(st.Pending) != 0 {
 		t.Fatalf("pending %+v", st.Pending)
+	}
+}
+
+func TestApprovalIDNotReusedAfterTabReopens(t *testing.T) {
+	tm := fastTiming()
+	tm.ApprovalTimeout = 700 * time.Millisecond
+	f := newFixture(t, tm)
+	ctx := context.Background()
+	first, err := f.svc.GenerateImage(ctx, ImageRequest{Text: "[fake:approval]", OutputPath: filepath.Join(f.out, "a.png")})
+	if err != nil || first.Status != "needs_approval" {
+		t.Fatalf("%+v %v", first, err)
+	}
+	time.Sleep(2 * time.Second) // times out; the image tab is closed
+	next, err := f.svc.Chat(ctx, ChatRequest{ChatID: first.ChatID, Message: "[fake:approval]"})
+	if err != nil || next.Status != "needs_approval" {
+		t.Fatalf("%+v %v", next, err)
+	}
+	if next.Approval.ID == first.Approval.ID {
+		t.Fatalf("approval ID %s reused", next.Approval.ID)
+	}
+	if _, err := f.svc.Decide(ctx, next.ChatID, next.Approval.ID, true); err != nil {
+		t.Fatalf("deciding the new approval: %v", err)
+	}
+}
+
+func TestClosedTabFailsFast(t *testing.T) {
+	f := newFixture(t, fastTiming())
+	errc := make(chan error, 1)
+	go func() {
+		_, err := f.svc.Chat(context.Background(), ChatRequest{Message: "[fake:slow]"})
+		errc <- err
+	}()
+	var tb *tab
+	for deadline := time.Now().Add(15 * time.Second); tb == nil && time.Now().Before(deadline); {
+		time.Sleep(100 * time.Millisecond)
+		tb = f.svc.onlyTab()
+	}
+	if tb == nil {
+		t.Fatal("chat never started")
+	}
+	c := chromedp.FromContext(tb.ctx)
+	if _, err := cdp.Call(context.Background(), c.Browser, target.CloseTarget, target.CloseTargetParams{TargetID: c.Target.TargetID}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-errc:
+		if err == nil || !strings.Contains(err.Error(), "closed or stopped responding") {
+			t.Fatalf("err = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("still waiting on a closed tab")
+	}
+	res, err := f.svc.Chat(context.Background(), ChatRequest{Message: "[fake:chat]"})
+	if err != nil || res.Status != "done" {
+		t.Fatalf("after close: %+v %v", res, err)
+	}
+}
+
+func TestStatusKeepsActiveTab(t *testing.T) {
+	var skew atomic.Int64
+	tm := fastTiming()
+	tm.ChatMax = 4 * time.Second
+	f := newFixture(t, tm)
+	f.svc.o.Now = func() time.Time { return time.Now().Add(time.Duration(skew.Load())) }
+	type out struct {
+		res Result
+		err error
+	}
+	done := make(chan out, 1)
+	go func() {
+		res, err := f.svc.Chat(context.Background(), ChatRequest{Message: "[fake:slow]"})
+		done <- out{res, err}
+	}()
+	for deadline := time.Now().Add(15 * time.Second); f.svc.onlyTab() == nil && time.Now().Before(deadline); {
+		time.Sleep(100 * time.Millisecond)
+	}
+	skew.Store(int64(20 * time.Minute))
+	if _, err := f.svc.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	o := <-done
+	if o.err != nil || o.res.Status != "timeout" {
+		t.Fatalf("Status dropped the tab in use: %+v %v", o.res, o.err)
+	}
+}
+
+func TestContinueWithUntrackedApprovalRefuses(t *testing.T) {
+	f := newFixture(t, fastTiming())
+	ctx := context.Background()
+	res, err := f.svc.Chat(ctx, ChatRequest{Message: "[fake:send-trap]"})
+	if err != nil || res.Status != "needs_approval" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	f.svc.forgetPending(res.ChatID) // as if muse-mcp restarted
+	_, err = f.svc.Chat(ctx, ChatRequest{ChatID: res.ChatID, Message: "hello"})
+	if !errors.Is(err, ErrUntrackedApproval) || !strings.Contains(err.Error(), res.ChatURL) {
+		t.Fatalf("err = %v", err)
 	}
 }

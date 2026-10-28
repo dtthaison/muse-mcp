@@ -16,3 +16,24 @@ func (s *Service) agentTexts(chatID string) []string {
 	}
 	return st.AgentTexts
 }
+
+// onlyTab returns the one open tab, or nil.
+func (s *Service) onlyTab() *tab {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, t := range s.tabs {
+		return t
+	}
+	return nil
+}
+
+// forgetPending drops a pending approval as a restart would, leaving the card
+// on the page.
+func (s *Service) forgetPending(chatID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if p := s.pending[chatID]; p != nil {
+		p.timer.Stop()
+		delete(s.pending, chatID)
+	}
+}

@@ -21,11 +21,12 @@ import (
 )
 
 var (
-	ErrLoggedOut        = errors.New("Log in to muse.ai in the window that just opened, then try again.")
-	ErrUnknownChat      = errors.New("unknown chat_id: only chats started by muse-mcp can be continued; start a new chat")
-	ErrAwaitingApproval = errors.New("this chat is waiting for an approval decision; call muse_decide_approval or wait for it to time out")
-	ErrNoSuchApproval   = errors.New("no such pending approval (the server may have restarted)")
-	ErrApprovalTimedOut = errors.New("already denied (timed out)")
+	ErrLoggedOut         = errors.New("Log in to muse.ai in the window that just opened, then try again.")
+	ErrUnknownChat       = errors.New("unknown chat_id: only chats started by muse-mcp can be continued; start a new chat")
+	ErrAwaitingApproval  = errors.New("this chat is waiting for an approval decision; call muse_decide_approval or wait for it to time out")
+	ErrNoSuchApproval    = errors.New("no such pending approval (the server may have restarted)")
+	ErrApprovalTimedOut  = errors.New("already denied (timed out)")
+	ErrUntrackedApproval = errors.New("this chat has an approval muse-mcp is not tracking (muse-mcp may have restarted); decide it in muse.ai first")
 )
 
 // RefusedError means muse answered with text and no image, even after the nudge.
@@ -87,11 +88,31 @@ type StatusInfo struct {
 
 // tab is an open chat page.
 type tab struct {
-	ctx       context.Context
-	cancel    context.CancelFunc
-	gen       uint64 // browser generation it was opened in
-	lastUsed  time.Time
-	approvals int
+	ctx      context.Context
+	cancel   context.CancelFunc
+	gen      uint64 // browser generation it was opened in
+	lastUsed time.Time
+	failing  failing
+}
+
+// errTabGone: chromedp does not notice a tab closed by hand, so a tab whose
+// page can't be read for Timing.Unresponsive counts as gone.
+var errTabGone = errors.New("the muse tab was closed or stopped responding; try again")
+
+// failing tracks how long page reads have been failing in a row.
+type failing struct{ since time.Time }
+
+// observe records one read and reports whether reads have failed for longer
+// than limit.
+func (f *failing) observe(err error, limit time.Duration) bool {
+	if err == nil {
+		f.since = time.Time{}
+		return false
+	}
+	if f.since.IsZero() {
+		f.since = time.Now()
+	}
+	return time.Since(f.since) > limit
 }
 
 // pending is a parked request waiting for the owner's approval decision.
@@ -111,6 +132,8 @@ type Service struct {
 
 	mu       sync.Mutex // guards everything below
 	tabs     map[string]*tab
+	active   *tab                // the tab the running call is using; sync never drops it
+	seq      uint64              // approval IDs are unique for the server's lifetime
 	pending  map[string]*pending // by chat ID
 	timedOut map[string]bool     // approval IDs denied by the timeout
 	watching bool
@@ -132,6 +155,7 @@ func New(o Options) *Service {
 func (s *Service) GenerateImage(ctx context.Context, r ImageRequest) (Result, error) {
 	s.call.Lock()
 	defer s.call.Unlock()
+	defer s.setActive(nil)
 	s.sync()
 	id, t, base, err := s.begin(ctx, "", r.Attachments, r.Text)
 	if err != nil {
@@ -144,6 +168,7 @@ func (s *Service) GenerateImage(ctx context.Context, r ImageRequest) (Result, er
 func (s *Service) Chat(ctx context.Context, r ChatRequest) (Result, error) {
 	s.call.Lock()
 	defer s.call.Unlock()
+	defer s.setActive(nil)
 	s.sync()
 	id, t, base, err := s.begin(ctx, r.ChatID, r.Attachments, r.Message)
 	if err != nil {
@@ -156,14 +181,15 @@ func (s *Service) Chat(ctx context.Context, r ChatRequest) (Result, error) {
 func (s *Service) Decide(ctx context.Context, chatID, approvalID string, approve bool) (Result, error) {
 	s.call.Lock()
 	defer s.call.Unlock()
+	defer s.setActive(nil)
 	s.sync()
 	s.mu.Lock()
 	timedOut, p := s.timedOut[approvalID], s.pending[chatID]
 	s.mu.Unlock()
-	if timedOut {
-		return Result{}, ErrApprovalTimedOut
-	}
 	if p == nil || p.ID != approvalID {
+		if timedOut {
+			return Result{}, ErrApprovalTimedOut
+		}
 		return Result{}, fmt.Errorf("%w; open the chat in muse.ai to decide it there: %s",
 			ErrNoSuchApproval, musepage.ThreadURL(s.o.BaseURL, chatID))
 	}
@@ -179,6 +205,8 @@ func (s *Service) Decide(ctx context.Context, chatID, approvalID string, approve
 	s.mu.Lock()
 	p.timer.Stop()
 	delete(s.pending, chatID)
+	p.tab.lastUsed = s.o.Now()
+	s.active = p.tab
 	s.mu.Unlock()
 	s.o.Log.Info("approval decided", "chat", chatID, "approval", approvalID, "approve", approve)
 	if p.image != nil {
@@ -255,6 +283,9 @@ func (s *Service) begin(ctx context.Context, chatID string, files []string, text
 		base, err = musepage.Snapshot(op)
 		release()
 	}
+	if err == nil && chatID != "" && base.Approval != nil {
+		err = fmt.Errorf("%w: %s", ErrUntrackedApproval, musepage.ThreadURL(s.o.BaseURL, chatID))
+	}
 	if err == nil {
 		op, release := bind(ctx, t.ctx)
 		if err = musepage.Attach(op, files); err == nil {
@@ -280,6 +311,7 @@ func (s *Service) begin(ctx context.Context, chatID string, files []string, text
 	s.mu.Lock()
 	t.lastUsed = s.o.Now()
 	s.tabs[chatID] = t
+	s.active = t
 	s.mu.Unlock()
 	return chatID, t, base, nil
 }
@@ -412,7 +444,8 @@ func (s *Service) poll(ctx, op context.Context, t *tab) (*musepage.State, error)
 	if err := sleep(ctx, s.o.Timing.Poll); err != nil {
 		return nil, err
 	}
-	snap, err := musepage.Snapshot(op)
+	snap, err := snapshot(op, s.o.Timing.Unresponsive)
+	gone := t.failing.observe(err, s.o.Timing.Unresponsive)
 	if err == nil {
 		if snap.Stalled {
 			s.o.Log.Info("muse page shows a stall message")
@@ -425,7 +458,17 @@ func (s *Service) poll(ctx, op context.Context, t *tab) (*musepage.State, error)
 	if t.ctx.Err() != nil {
 		return nil, errors.New("Chrome closed while waiting for muse; try again")
 	}
+	if gone {
+		return nil, errTabGone
+	}
 	return nil, nil
+}
+
+// snapshot reads the page, giving up after limit (a closed tab can hang).
+func snapshot(ctx context.Context, limit time.Duration) (musepage.State, error) {
+	c, cancel := context.WithTimeout(ctx, limit)
+	defer cancel()
+	return musepage.Snapshot(c)
 }
 
 func (s *Service) download(op context.Context, im musepage.Image, save func([]byte) (output.Saved, error)) (output.Saved, error) {
@@ -441,9 +484,10 @@ func (s *Service) download(op context.Context, im musepage.Image, save func([]by
 func (s *Service) park(id string, t *tab, snap musepage.State, res Result, p *pending) Result {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	t.approvals++
+	s.seq++
+	t.lastUsed = s.o.Now()
 	p.tab = t
-	p.PendingApproval = PendingApproval{ChatID: id, ID: fmt.Sprintf("%s-%d", id, t.approvals),
+	p.PendingApproval = PendingApproval{ChatID: id, ID: fmt.Sprintf("%s-%d", id, s.seq),
 		Text: snap.Approval.Text, ExpiresAt: s.o.Now().Add(s.o.Timing.ApprovalTimeout)}
 	approvalID := p.ID
 	p.timer = time.AfterFunc(s.o.Timing.ApprovalTimeout, func() { s.expire(id, approvalID) })
@@ -517,11 +561,16 @@ func (s *Service) watchLogin(tabCtx context.Context, cancel context.CancelFunc) 
 		s.watching = false
 		s.mu.Unlock()
 	}()
+	var f failing
 	for {
 		if sleep(tabCtx, loginPoll) != nil {
-			return // window closed or Chrome relaunched
+			return // Chrome relaunched
 		}
-		st, err := musepage.Snapshot(tabCtx)
+		st, err := snapshot(tabCtx, s.o.Timing.Unresponsive)
+		if f.observe(err, s.o.Timing.Unresponsive) {
+			s.o.Log.Info("login window closed")
+			return // the next muse call opens it again
+		}
 		if err != nil || !st.Ready || st.LoggedOut {
 			continue
 		}
@@ -550,7 +599,7 @@ func (s *Service) sync() {
 	for id, t := range s.tabs {
 		p := s.pending[id]
 		stale := t.gen != gen || !running || t.ctx.Err() != nil
-		idle := p == nil && now.Sub(t.lastUsed) > idleTabLimit
+		idle := p == nil && t != s.active && now.Sub(t.lastUsed) > idleTabLimit
 		if !stale && !idle {
 			continue
 		}
@@ -570,6 +619,12 @@ func (s *Service) newTab(ctx context.Context) (*tab, error) {
 		return nil, err
 	}
 	return &tab{ctx: c, cancel: cancel, gen: s.o.Browser.Generation(), lastUsed: s.o.Now()}, nil
+}
+
+func (s *Service) setActive(t *tab) {
+	s.mu.Lock()
+	s.active = t
+	s.mu.Unlock()
 }
 
 func (s *Service) dropTab(id string) {
