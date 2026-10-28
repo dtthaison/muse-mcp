@@ -43,7 +43,7 @@ func TestLive(t *testing.T) {
 	if out == "" {
 		out = filepath.Join(os.TempDir(), "muse-mcp-live")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 14*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 28*time.Minute)
 	defer cancel()
 
 	generate := func(t *testing.T, in prompt.Input, file string) string {
@@ -52,10 +52,12 @@ func TestLive(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		res, err := svc.GenerateImage(ctx, ImageRequest{Text: built.Text, Attachments: built.Attachments,
-			OutputPath: filepath.Join(out, file)})
+		req := ImageRequest{Text: built.Text, Attachments: built.Attachments, OutputPath: filepath.Join(out, file)}
+		res, err := svc.GenerateImage(ctx, req)
 		if errors.Is(err, ErrLoggedOut) {
-			t.Fatal("not logged in: log in to muse.ai in the Chrome window that opened, then rerun")
+			t.Log("not logged in: log in to muse.ai in the Chrome window that opened (waiting up to 10 minutes)")
+			waitLogin(t, ctx, svc, 10*time.Minute)
+			res, err = svc.GenerateImage(ctx, req)
 		}
 		if err != nil {
 			t.Fatal(err)
@@ -82,4 +84,19 @@ func TestLive(t *testing.T) {
 		}
 		generate(t, prompt.Input{Change: "the teapot is now red", References: []string{teapot}}, "teapot-red.png")
 	})
+}
+
+// waitLogin waits for the owner to log in in the window ErrLoggedOut opened.
+func waitLogin(t *testing.T, ctx context.Context, svc *Service, limit time.Duration) {
+	t.Helper()
+	for deadline := time.Now().Add(limit); time.Now().Before(deadline); {
+		if st, err := svc.Status(ctx); err == nil && st.LoggedIn {
+			t.Log("login detected")
+			return
+		}
+		if err := sleep(ctx, 3*time.Second); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Fatal("not logged in after waiting")
 }

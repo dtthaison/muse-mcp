@@ -84,8 +84,11 @@ Everything lives in `~/.muse-mcp/` (override with `MUSE_MCP_HOME`):
 ```sh
 go test ./...                                   # offline, headless Chrome + a fake muse page
 MUSE_TEST_VISIBLE=1 go test ./...               # also the tests that open a visible window
-MUSE_LIVE=1 go test ./internal/muse/ -run Live  # real muse.ai: uses quota, adds chats
+MUSE_LIVE=1 go test ./internal/muse/ -run Live -v -timeout 30m  # real muse.ai: uses quota, adds 2 chats
 ```
+
+The live test waits up to 10 minutes for you to log in if the profile isn't
+logged in yet.
 
 Everything muse-mcp knows about the muse.ai page is in
 `internal/musepage/page.go`. When muse.ai changes, start there.
