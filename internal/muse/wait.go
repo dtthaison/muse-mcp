@@ -20,6 +20,7 @@ type Timing struct {
 	ChatStable      time.Duration // reply unchanged and idle this long → done
 	ChatForcePolls  int           // reply unchanged for this many polls → done even if busy
 	ApprovalTimeout time.Duration // unanswered approval → Deny
+	Unresponsive    time.Duration // page reads failing this long → the tab is gone
 }
 
 func DefaultTiming() Timing {
@@ -35,6 +36,7 @@ func DefaultTiming() Timing {
 		ChatStable:      3 * time.Second,
 		ChatForcePolls:  12,
 		ApprovalTimeout: 10 * time.Minute,
+		Unresponsive:    20 * time.Second,
 	}
 }
 
