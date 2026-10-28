@@ -1,0 +1,172 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>fake muse</title>
+<style>
+  body { font-family: sans-serif; }
+  .hatch-agent-bubble-bg-fake { background: #eef; margin: 4px; padding: 4px; }
+  .user { background: #efe; margin: 4px; padding: 4px; }
+  input[type=file] { display: none; }
+</style>
+</head>
+<body>
+<!--
+  Offline stand-in for muse.ai. It uses the same selectors muse-mcp relies on
+  (see internal/musepage/page.go). Keywords in a message pick a scenario:
+  [fake:image] [fake:textonly] [fake:textonly-then-image] [fake:approval]
+  [fake:approval-oddlabel] [fake:chat] [fake:slow] [fake:echo-attachments]
+-->
+<main><div id="log"></div></main>
+<div id="composer" data-hatch-shell-hydration-state="hydrating">
+  <div id="chips"></div>
+  <textarea aria-label="Message"></textarea>
+  <input type="file" multiple>
+  <button id="attach" aria-label="Attach file">+</button>
+  <button id="send" aria-label="Send">Send</button>
+</div>
+<script>
+const log = document.getElementById('log');
+const composer = document.getElementById('composer');
+const chips = document.getElementById('chips');
+const ta = document.querySelector('textarea');
+const fileInput = document.querySelector('input[type=file]');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let attached = [];
+let mode = '';
+
+setTimeout(() => composer.setAttribute('data-hatch-shell-hydration-state', 'hydrated'), 200);
+
+fileInput.addEventListener('change', () => {
+  for (const f of fileInput.files) {
+    attached.push(f.name);
+    const b = document.createElement('button');
+    b.setAttribute('aria-label', 'Remove attachment');
+    b.textContent = 'x ' + f.name;
+    chips.appendChild(b);
+  }
+});
+
+function setBusy(on) {
+  let stop = document.getElementById('stop');
+  if (on && !stop) {
+    stop = document.createElement('button');
+    stop.id = 'stop';
+    stop.setAttribute('aria-label', 'Stop generating');
+    stop.textContent = 'Stop';
+    composer.appendChild(stop);
+  } else if (!on && stop) {
+    stop.remove();
+  }
+}
+
+function bubble(text) {
+  const d = document.createElement('div');
+  d.className = 'msg hatch-agent-bubble-bg-fake';
+  d.textContent = text;
+  log.appendChild(d);
+  return d;
+}
+
+function image() {
+  return new Promise(resolve => {
+    const c = document.createElement('canvas');
+    c.width = 64; c.height = 48;
+    const g = c.getContext('2d');
+    g.fillStyle = 'red'; g.fillRect(0, 0, 64, 48);
+    c.toBlob(blob => {
+      // Result images sit next to the agent bubble, not inside it (as on muse.ai).
+      const wrap = document.createElement('div');
+      wrap.setAttribute('data-testid', 'hatch-chat-attachment-presentation-image');
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(blob);
+      img.onload = resolve;
+      wrap.appendChild(img);
+      log.appendChild(wrap);
+    }, 'image/png');
+  });
+}
+
+function approvalCard(approveLabel, onApprove, onDeny) {
+  const card = document.createElement('div');
+  card.setAttribute('data-testid', 'hatch-inline-approval-card');
+  const t = document.createElement('span');
+  t.textContent = 'Upload image to Page album';
+  card.appendChild(t);
+  for (const [label, fn] of [[approveLabel, onApprove], ['Deny', onDeny]]) {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.addEventListener('click', async () => { card.remove(); await fn(); setBusy(false); });
+    card.appendChild(b);
+  }
+  log.appendChild(card);
+}
+
+async function respond(text, names) {
+  const m = text.match(/\[fake:([a-z-]+)\]/);
+  if (m) mode = m[1];
+  const nudge = !m && text.includes('Please attach the final image');
+  const scenario = m ? m[1] : (nudge ? mode + ':nudge' : 'default');
+  setBusy(true);
+  await sleep(300);
+  switch (scenario) {
+    case 'image':
+      await sleep(500);
+      bubble('Here is your image.');
+      await sleep(700);
+      await image();
+      break;
+    case 'textonly':
+    case 'textonly-then-image':
+      bubble("I can't make that.");
+      break;
+    case 'textonly:nudge':
+      bubble("Still can't.");
+      break;
+    case 'textonly-then-image:nudge':
+      bubble('Here it is.');
+      await image();
+      break;
+    case 'approval':
+    case 'approval-oddlabel':
+      bubble("I'd like to upload it.");
+      approvalCard(scenario === 'approval' ? 'Approve' : 'Go ahead',
+        async () => { bubble('Uploaded.'); await image(); },
+        async () => { bubble('Okay, not uploading.'); await image(); });
+      return; // stays busy until decided
+    case 'chat': {
+      const b = bubble('Hello');
+      await sleep(300); b.textContent = 'Hello from';
+      await sleep(300); b.textContent = 'Hello from fake muse.';
+      break;
+    }
+    case 'slow':
+      return; // busy forever
+    case 'echo-attachments':
+      bubble('files: ' + names.join(','));
+      break;
+    default:
+      bubble('ok');
+  }
+  setBusy(false);
+}
+
+document.getElementById('send').addEventListener('click', () => {
+  const text = ta.value;
+  if (!text) return;
+  const names = attached;
+  attached = [];
+  chips.innerHTML = '';
+  ta.value = '';
+  if (location.pathname === '/thread/new' || !location.pathname.startsWith('/thread/')) {
+    history.pushState({}, '', '/thread/' + crypto.randomUUID());
+  }
+  const u = document.createElement('div');
+  u.className = 'user';
+  u.textContent = text;
+  log.appendChild(u);
+  respond(text, names);
+});
+</script>
+</body>
+</html>
