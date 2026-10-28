@@ -90,4 +90,6 @@ func (u unavailable) Chat(context.Context, muse.ChatRequest) (muse.Result, error
 func (u unavailable) Decide(context.Context, string, string, bool) (muse.Result, error) {
 	return muse.Result{}, u.err
 }
-func (u unavailable) Status(context.Context) (muse.StatusInfo, error) { return muse.StatusInfo{}, u.err }
+func (u unavailable) Status(context.Context) (muse.StatusInfo, error) {
+	return muse.StatusInfo{}, u.err
+}
