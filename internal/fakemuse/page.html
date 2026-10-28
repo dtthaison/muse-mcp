@@ -15,7 +15,8 @@
   Offline stand-in for muse.ai. It uses the same selectors muse-mcp relies on
   (see internal/musepage/page.go). Keywords in a message pick a scenario:
   [fake:image] [fake:textonly] [fake:textonly-then-image] [fake:approval]
-  [fake:approval-oddlabel] [fake:chat] [fake:slow] [fake:echo-attachments]
+  [fake:approval-oddlabel] [fake:approval-sticky] [fake:send-trap] [fake:chat]
+  [fake:slow] [fake:echo-attachments]
 -->
 <main><div id="log"></div></main>
 <div id="composer" data-hatch-shell-hydration-state="hydrating">
@@ -87,16 +88,24 @@ function image() {
   });
 }
 
-function approvalCard(approveLabel, onApprove, onDeny) {
+// sticky: the decided card stays in the chat with its buttons disabled.
+function approvalCard(approveLabel, onApprove, onDeny, sticky) {
   const card = document.createElement('div');
   card.setAttribute('data-testid', 'hatch-inline-approval-card');
   const t = document.createElement('span');
   t.textContent = 'Upload image to Page album';
   card.appendChild(t);
+  const buttons = [];
   for (const [label, fn] of [[approveLabel, onApprove], ['Deny', onDeny]]) {
     const b = document.createElement('button');
     b.textContent = label;
-    b.addEventListener('click', async () => { card.remove(); await fn(); setBusy(false); });
+    b.setAttribute('aria-label', label);
+    b.addEventListener('click', async () => {
+      if (sticky) buttons.forEach(x => x.disabled = true); else card.remove();
+      await fn();
+      setBusy(false);
+    });
+    buttons.push(b);
     card.appendChild(b);
   }
   log.appendChild(card);
@@ -129,11 +138,18 @@ async function respond(text, names) {
       break;
     case 'approval':
     case 'approval-oddlabel':
+    case 'approval-sticky':
       bubble("I'd like to upload it.");
-      approvalCard(scenario === 'approval' ? 'Approve' : 'Go ahead',
+      approvalCard(scenario === 'approval-oddlabel' ? 'Go ahead' : 'Approve',
         async () => { bubble('Uploaded.'); await image(); },
-        async () => { bubble('Okay, not uploading.'); await image(); });
+        async () => { bubble('Okay, not uploading.'); await image(); },
+        scenario === 'approval-sticky');
       return; // stays busy until decided
+    case 'send-trap':
+      // A card whose approve button mentions "send": clicking it is an approval.
+      bubble('May I email this?');
+      approvalCard('Send email', async () => { bubble('SENT EMAIL'); }, async () => { bubble('Not sending.'); });
+      return;
     case 'chat': {
       const b = bubble('Hello');
       await sleep(300); b.textContent = 'Hello from';
