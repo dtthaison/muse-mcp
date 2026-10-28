@@ -198,6 +198,21 @@ func TestWaitChatTimeoutExtendsWhileBusyUntilMax(t *testing.T) {
 	}
 }
 
+func TestWaitResumeRestartsClock(t *testing.T) {
+	tm := waitTiming()
+	later := t0.Add(tm.ImageTimeout + time.Minute) // the owner took a while to approve
+	iw := NewImageWait(musepage.State{}, tm, t0)
+	iw.Resume(later)
+	if got := iw.Step(musepage.State{AgentTexts: []string{"Uploaded."}}, later.Add(time.Second)); got != Continue {
+		t.Fatalf("image wait after resume: %v", got)
+	}
+	cw := NewChatWait(musepage.State{}, tm, t0)
+	cw.Resume(later)
+	if got := cw.Step(musepage.State{}, later.Add(time.Second)); got != Continue {
+		t.Fatalf("chat wait after resume: %v", got)
+	}
+}
+
 func TestDefaultTiming(t *testing.T) {
 	d := DefaultTiming()
 	want := Timing{Poll: 1500 * time.Millisecond, Ready: 45 * time.Second, ImageTimeout: 4 * time.Minute,

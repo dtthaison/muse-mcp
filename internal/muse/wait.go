@@ -70,18 +70,27 @@ func (c *idleClock) observe(busy bool, now time.Time) time.Duration {
 
 // ImageWait decides when an image request is finished.
 type ImageWait struct {
-	t          Timing
-	start      time.Time
-	baseImages int
-	baseAgents int
-	lastAgents int
-	idle       idleClock
-	nudged     bool
+	t           Timing
+	start       time.Time
+	baseImages  int
+	startAgents int // agent messages before the request; Reply starts after these
+	baseAgents  int // moves past the first reply once nudged
+	lastAgents  int
+	idle        idleClock
+	nudged      bool
 }
 
 func NewImageWait(base musepage.State, t Timing, start time.Time) *ImageWait {
-	return &ImageWait{t: t, start: start, baseImages: len(base.Images),
-		baseAgents: len(base.AgentTexts), lastAgents: len(base.AgentTexts)}
+	n := len(base.AgentTexts)
+	return &ImageWait{t: t, start: start, baseImages: len(base.Images), startAgents: n, baseAgents: n, lastAgents: n}
+}
+
+// Reply is everything muse wrote since the request was sent.
+func (w *ImageWait) Reply(s musepage.State) string {
+	if len(s.AgentTexts) <= w.startAgents {
+		return ""
+	}
+	return strings.Join(s.AgentTexts[w.startAgents:], "\n\n")
 }
 
 func (w *ImageWait) Step(s musepage.State, now time.Time) Verdict {
@@ -106,6 +115,12 @@ func (w *ImageWait) Step(s musepage.State, now time.Time) Verdict {
 		return TimedOut
 	}
 	return Continue
+}
+
+// Resume restarts the timeouts after the wait was parked on an approval.
+func (w *ImageWait) Resume(now time.Time) {
+	w.start = now
+	w.idle = idleClock{}
 }
 
 // Nudged marks that the nudge was sent: only a reply after it counts.
@@ -160,6 +175,11 @@ func (w *ChatWait) Step(s musepage.State, now time.Time) Verdict {
 		return TimedOut
 	}
 	return Continue
+}
+
+// Resume restarts the timeouts after the wait was parked on an approval.
+func (w *ChatWait) Resume(now time.Time) {
+	w.start, w.stableSince, w.stablePolls = now, now, 0
 }
 
 // Reply is every agent message after the wait began, in order.
