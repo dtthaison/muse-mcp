@@ -62,7 +62,7 @@ func (s *Store) Save(name string, kind Kind, description string, imagePaths []st
 		return Ref{}, errors.New("a reference needs at least one image")
 	}
 	for _, p := range imagePaths {
-		if err := checkImage(p); err != nil {
+		if err := CheckImage(p); err != nil {
 			return Ref{}, fmt.Errorf("reference image %q: %w", p, err)
 		}
 	}
@@ -172,8 +172,8 @@ func (s *Store) Delete(name string) error {
 	return os.RemoveAll(filepath.Join(s.dir, name))
 }
 
-// checkImage requires a readable file whose content sniffs as an image.
-func checkImage(path string) error {
+// CheckImage requires a readable file whose content sniffs as an image.
+func CheckImage(path string) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
