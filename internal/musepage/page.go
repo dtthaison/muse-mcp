@@ -96,7 +96,7 @@ var snapshotJS = fmt.Sprintf(`(() => {
   const body = document.body ? document.body.innerText : '';
   const input = document.querySelector(%[1]s);
   const hyd = document.querySelector(%[2]s);
-  const card = document.querySelector(%[6]s);
+  const card = %[9]s;
   return {
     url: location.href,
     ready: document.readyState === 'complete' && !!input
@@ -111,9 +111,15 @@ var snapshotJS = fmt.Sprintf(`(() => {
     approval: card ? { text: (card.innerText || '').trim() } : null,
   };
 })()`, q(selInput), q(selHydration), q(selStop), q(selAgentBubble), q(selResultImage),
-	q(selApprovalCard), q(textLoggedOut), mustJSON(stallTexts))
+	q(selApprovalCard), q(textLoggedOut), mustJSON(stallTexts), pendingCardJS)
 
 func mustJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
+
+// pendingCardJS finds the newest approval card that still has an enabled
+// button. A decided card can stay in the chat with its buttons disabled.
+var pendingCardJS = fmt.Sprintf(`[...document.querySelectorAll(%s)].reverse().find(c =>
+    [...c.querySelectorAll('button,[role=button]')].some(b => !b.disabled && b.getAttribute('aria-disabled') !== 'true'))`,
+	q(selApprovalCard))
 
 // Snapshot reads the page state. It can fail transiently while a page loads.
 func Snapshot(ctx context.Context) (State, error) {
@@ -170,15 +176,21 @@ func Attach(ctx context.Context, files []string) error {
 	return fmt.Errorf("muse did not accept the %d attached file(s)", len(files))
 }
 
-var clickSendJS = `(() => {
-  const b = [...document.querySelectorAll('button,[role=button]')]
-    .filter(b => b.offsetParent !== null)
-    .find(b => /send/i.test((b.getAttribute('aria-label') || '') + ' ' + (b.getAttribute('data-testid') || '')));
+// clickSendJS looks for the send button near the chat box (muse's is within
+// 5 levels of the textarea), never inside an approval card: a card button
+// like "Send email" is an approval, not the composer.
+var clickSendJS = fmt.Sprintf(`(() => {
+  const isSend = b => b.offsetParent !== null && !b.closest(%s)
+    && /send/i.test((b.getAttribute('aria-label') || '') + ' ' + (b.getAttribute('data-testid') || ''));
+  let b = null;
+  for (let n = document.querySelector(%s), i = 0; n && !b && i < 7; n = n.parentElement, i++) {
+    b = [...n.querySelectorAll('button,[role=button]')].find(isSend);
+  }
   if (!b) return 'missing';
   if (b.disabled || b.getAttribute('aria-disabled') === 'true') return 'disabled';
   b.click();
   return 'clicked';
-})()`
+})()`, q(selApprovalCard), q(selInput))
 
 var inputEmptyJS = fmt.Sprintf(`!(document.querySelector(%s) || {value: ''}).value`, q(selInput))
 
@@ -259,14 +271,14 @@ func Decide(ctx context.Context, approve bool) error {
 		labels = approveLabels
 	}
 	js := fmt.Sprintf(`(() => {
-  const card = document.querySelector(%s);
+  const card = %s;
   if (!card) return 'nocard';
   const re = new RegExp(%s, 'i');
   const b = [...card.querySelectorAll('button,[role=button]')].find(b => re.test((b.innerText || '').trim()));
   if (!b || b.disabled) return 'nobutton';
   b.click();
   return 'clicked';
-})()`, q(selApprovalCard), q(labels))
+})()`, pendingCardJS, q(labels))
 	res, err := chromedp.Run(ctx, chromedp.Evaluate[string](js))
 	if err != nil {
 		return err

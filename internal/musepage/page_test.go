@@ -203,3 +203,37 @@ func TestOddApproveLabel(t *testing.T) {
 		t.Fatalf("card gone: %+v %v", s, err)
 	}
 }
+
+func TestDecidedCardNotPending(t *testing.T) {
+	ctx, _ := openChat(t)
+	if err := Send(ctx, "[fake:approval-sticky]"); err != nil {
+		t.Fatal(err)
+	}
+	until(t, ctx, "approval card", func(s State) bool { return s.Approval != nil })
+	if err := Decide(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	s := until(t, ctx, "after approve", func(s State) bool { return !s.Busy })
+	if s.Approval != nil || lastText(s) != "Uploaded." {
+		t.Fatalf("a decided card still counts as pending: %+v", s)
+	}
+}
+
+func TestSendIgnoresApprovalCardButtons(t *testing.T) {
+	ctx, _ := openChat(t)
+	if err := Send(ctx, "[fake:send-trap]"); err != nil {
+		t.Fatal(err)
+	}
+	until(t, ctx, "approval card", func(s State) bool { return s.Approval != nil })
+	err := Send(ctx, "hello")
+	time.Sleep(500 * time.Millisecond)
+	s, _ := Snapshot(ctx)
+	for _, txt := range s.AgentTexts {
+		if txt == "SENT EMAIL" {
+			t.Fatal("Send clicked the approval card's button")
+		}
+	}
+	if err != nil || s.Approval == nil {
+		t.Fatalf("err=%v approval=%v", err, s.Approval)
+	}
+}
