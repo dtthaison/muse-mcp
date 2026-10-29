@@ -6,20 +6,17 @@ on:
   pull_request:
 
 jobs:
+  # Linux only: headless Chrome on GitHub's macOS runners can't load the fake
+  # page's recorded video. Run the tests on a Mac before a release.
   test:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
       # Ubuntu 24.04 blocks the unprivileged user namespaces Chrome's sandbox needs.
-      - if: runner.os == 'Linux'
-        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: test -z "$(gofmt -l .)"
       - run: go vet ./...
       # Offline only: headless Chrome against the fake muse page.
