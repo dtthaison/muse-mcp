@@ -116,9 +116,10 @@ When muse asks to act on your accounts, the CLI asks you `Approve? [y/N]` in the
 terminal. Without a terminal (in a script) it never approves: the request stays
 unanswered in muse and the CLI exits with code 3.
 
-Only one muse-mcp can use your muse login at a time. While a Claude Code session
-has the server running, CLI commands that talk to muse say so; use the tools in
-Claude Code, or quit that session first. `refs` commands always work.
+Only one muse-mcp can use your muse login at a time. A Claude Code session
+takes it on its first muse call and keeps it until the session ends; until
+then, other sessions and CLI commands that talk to muse say so. Use muse in
+that session, or quit it first. `refs` and `chats` (the list) always work.
 
 ## Video (experimental)
 
