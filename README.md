@@ -107,7 +107,7 @@ again." The window hides itself once muse.ai shows your chats.
 | Tool | What it does |
 |---|---|
 | `muse_generate_image` | Makes an image and saves it to `output_path` (`.png`, `.jpg`/`.jpeg` or `.webp`). Takes about a minute. |
-| `muse_generate_video` | **Experimental, under testing.** Makes a short video and saves it to `output_path` (`.mp4` or `.webm`). See [Video](#video-experimental). |
+| `muse_generate_video` | **Experimental, not yet tested end to end (TBD).** Makes a short video and saves it to `output_path` (`.mp4` or `.webm`). See [Video](#video-experimental). |
 | `muse_generate_speech` | **Experimental, under testing.** Makes a text-to-speech clip and saves it in `output_dir` as `<chat id>-<chat title>.mp3`. See [Speech](#speech-experimental). |
 | `muse_list_voices` | Searches muse's voice catalog by words, gender, accent or tone. |
 | `muse_chat` | Sends a message to your muse agent. Pass `chat_id` to continue a conversation; `save_images_to` saves any images, videos or audio clips it sends. |

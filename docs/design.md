@@ -102,6 +102,9 @@ Video and text-to-speech were added later as experimental tools (§3a).
   in the test). The page has other `<video>` elements (480×480 decoration),
   so only ones inside that wrapper count. AI video was blocked for the test
   account and region; muse made a substitute itself (an animated still).
+  **Status: not yet tested end to end with a real AI video; TBD** once an
+  account where muse video works is available. Only the fake page covers
+  saving a real clip.
 - **Voice (text to speech):** muse posts a clip as
   `[data-testid="hatch-chat-attachment-presentation-audio"]`, a player card
   with "Play" and "Audio options" buttons (the options menu only has

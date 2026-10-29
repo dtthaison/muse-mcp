@@ -8,6 +8,9 @@ exact first frame, and there's no first-and-last-frame mode.
 
 ## Before the call
 
+- muse-mcp's video tool hasn't been tested end to end yet: muse blocks AI
+  video for its author's account. Treat the first video as a test, and tell
+  the owner if the result or the saved file looks wrong.
 - muse blocks AI video for some accounts and regions. Say so up front
   unless a video has worked for this owner before. If the reply says it was
   blocked, or muse sent a still or an animated still instead, tell the owner

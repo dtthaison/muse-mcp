@@ -68,7 +68,7 @@ Usage:
   muse-mcp status                Chrome, login and pending approvals
 
   muse-mcp image -o OUT.png [flags] PROMPT
-  muse-mcp video -o OUT.mp4 [flags] PROMPT     (experimental, under testing)
+  muse-mcp video -o OUT.mp4 [flags] PROMPT     (experimental, not yet tested end to end)
       --change TEXT        change only this, keep everything else
       --character NAME     saved character to attach (repeatable)
       --scene NAME         saved scene to attach
