@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/png"
 	"os"
@@ -350,5 +351,28 @@ func TestVoices(t *testing.T) {
 	if code := h.run("", true, "voices", "--gender", "female", "--accent", "vietnamese"); code != 0 ||
 		!strings.Contains(h.out.String(), "Lan (F, Vietnamese, Bright): Young") || strings.Contains(h.out.String(), "Aria") {
 		t.Fatalf("search: code=%d stdout=%q", code, h.out.String())
+	}
+}
+
+func TestVoicesAllAndAccents(t *testing.T) {
+	h := newHarness(t)
+	var csv strings.Builder
+	csv.WriteString("name,gender,accent,tone,description\n")
+	for i := 0; i < 30; i++ {
+		fmt.Fprintf(&csv, "V%d,F,British,Warm,x\n", i)
+	}
+	csv.WriteString("Lan,M,Vietnamese,Bright,y\n")
+	src := filepath.Join(t.TempDir(), "v.csv")
+	os.WriteFile(src, []byte(csv.String()), 0o600)
+	if code := h.run("", true, "voices", "import", src); code != 0 {
+		t.Fatal(h.errOut.String())
+	}
+	if code := h.run("", true, "voices", "--all"); code != 0 || strings.Count(h.out.String(), "\n") != 31 || strings.Contains(h.out.String(), "more") {
+		t.Fatalf("all: code=%d stdout=%q", code, h.out.String())
+	}
+	if code := h.run("", true, "voices", "accents"); code != 0 ||
+		!strings.Contains(h.out.String(), "British") || !strings.Contains(h.out.String(), "30") ||
+		strings.Index(h.out.String(), "British") > strings.Index(h.out.String(), "Vietnamese") {
+		t.Fatalf("accents: code=%d stdout=%q", code, h.out.String())
 	}
 }

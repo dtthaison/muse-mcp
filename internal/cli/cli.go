@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/dtthaison/muse-mcp/internal/library"
 	"github.com/dtthaison/muse-mcp/internal/muse"
@@ -67,7 +68,8 @@ Usage:
       --aspect RATIO       e.g. 16:9
 
   muse-mcp voice -o OUT.mp3 [--voice NAME] [--style TEXT] TEXT   (experimental)
-  muse-mcp voices [--gender G] [--accent A] [--tone T] [--limit N] [WORDS]
+  muse-mcp voices [--gender G] [--accent A] [--tone T] [--limit N | --all] [WORDS]
+  muse-mcp voices accents          how many voices each accent has
   muse-mcp voices import FILE.csv   muse's voice catalog (ask muse for it as CSV)
 
   muse-mcp chat [--chat ID] [--attach FILE]... [--save DIR] MESSAGE
@@ -315,12 +317,26 @@ func (r *runner) voices(args []string) int {
 		fmt.Fprintf(r.env.Stdout, "Imported %d voices.\n", n)
 		return exitOK
 	}
+	if len(args) > 0 && args[0] == "accents" {
+		as, err := r.env.Voices.Accents()
+		if err != nil {
+			return r.fail(err)
+		}
+		tw := tabwriter.NewWriter(r.env.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(tw, "ACCENT\tVOICES\tFEMALE\tMALE\tNEUTRAL")
+		for _, a := range as {
+			fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\n", a.Accent, a.Total, a.Female, a.Male, a.Neutral)
+		}
+		tw.Flush()
+		return exitOK
+	}
 	fs := r.newFlags("voices")
 	var q voices.Query
 	fs.StringVar(&q.Gender, "gender", "", "female, male or neutral")
 	fs.StringVar(&q.Accent, "accent", "", "")
 	fs.StringVar(&q.Tone, "tone", "", "")
 	fs.IntVar(&q.Limit, "limit", 20, "")
+	fs.BoolVar(&q.All, "all", false, "every match, no limit")
 	rest, err := parse(fs, args)
 	if err != nil {
 		return exitUsage
