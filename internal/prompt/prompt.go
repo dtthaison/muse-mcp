@@ -15,10 +15,12 @@ import (
 // MaxAttachments caps the files sent with one request.
 const MaxAttachments = 10
 
-// Nudge is sent once when muse answers with text but no image.
-const Nudge = "Please attach the final image here in the chat, as a single image."
-
-const closing = "Attach the final image here in the chat as a single image."
+// Nudge is sent once when muse answers with text but no image; NudgeVideo
+// when it should have been a video.
+const (
+	Nudge      = "Please attach the final image here in the chat, as a single image."
+	NudgeVideo = "Please attach the final video here in the chat, as a single video."
+)
 
 // Input is what the caller asked for, with saved references already resolved.
 type Input struct {
@@ -29,6 +31,7 @@ type Input struct {
 	References     []string // ad hoc image files
 	ReferenceNotes string
 	AspectRatio    string
+	Video          bool // ask for a video instead of an image
 }
 
 // Built is the text to send and the files to attach, in the order the text
@@ -83,15 +86,22 @@ func Build(in Input) (Built, error) {
 		return Built{}, fmt.Errorf("%d reference images; at most %d per request, so use fewer references", len(files), MaxAttachments)
 	}
 
+	kind := "image"
+	if in.Video {
+		kind = "video"
+	}
 	var instr string
 	if in.Change != "" {
-		instr = fmt.Sprintf("Generate a new image. Change ONLY: %s. Keep everything else identical: same character(s), same scene, same lighting, same framing and camera angle, same style. Do not add or remove anything else.",
+		instr = fmt.Sprintf("Generate a new "+kind+". Change ONLY: %s. Keep everything else identical: same character(s), same scene, same lighting, same framing and camera angle, same style. Do not add or remove anything else.",
 			sentence(in.Change))
 		if in.Prompt != "" {
 			instr += "\n\n" + in.Prompt
 		}
 	} else {
-		instr = "Generate an image: " + in.Prompt
+		instr = "Generate a video: " + in.Prompt
+		if !in.Video {
+			instr = "Generate an image: " + in.Prompt
+		}
 	}
 	if in.AspectRatio != "" {
 		instr += " Aspect ratio " + in.AspectRatio + "."
@@ -104,7 +114,7 @@ func Build(in Input) (Built, error) {
 	}
 	b.WriteString(instr)
 	b.WriteString("\n\n")
-	b.WriteString(closing)
+	b.WriteString("Attach the final " + kind + " here in the chat as a single " + kind + ".")
 	return Built{Text: b.String(), Attachments: files}, nil
 }
 

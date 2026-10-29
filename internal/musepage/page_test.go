@@ -237,3 +237,34 @@ func TestSendIgnoresApprovalCardButtons(t *testing.T) {
 		t.Fatalf("err=%v approval=%v", err, s.Approval)
 	}
 }
+
+func TestVideoResult(t *testing.T) {
+	ctx, _ := openChat(t)
+	if err := Send(ctx, "[fake:video]"); err != nil {
+		t.Fatal(err)
+	}
+	s := until(t, ctx, "a loaded video", func(s State) bool {
+		return !s.Busy && len(s.Videos) == 1 && strings.HasPrefix(s.Videos[0].Src, "blob:") && s.Videos[0].Width > 0
+	})
+	if len(s.Images) != 0 || s.Videos[0].Width != 64 || s.Videos[0].Height != 48 {
+		t.Fatalf("state %+v", s)
+	}
+	data, err := Download(ctx, s.Videos[0].Src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(data, []byte("\x1a\x45\xdf\xa3")) {
+		t.Fatalf("not a webm: % x", data[:min(8, len(data))])
+	}
+}
+
+func TestDecorativeVideosIgnored(t *testing.T) {
+	ctx, _ := openChat(t)
+	if err := Send(ctx, "[fake:decor-video]"); err != nil {
+		t.Fatal(err)
+	}
+	s := until(t, ctx, "reply", func(s State) bool { return !s.Busy && len(s.AgentTexts) > 0 })
+	if len(s.Videos) != 0 {
+		t.Fatalf("a video outside a chat attachment counted: %+v", s.Videos)
+	}
+}
