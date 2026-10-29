@@ -29,8 +29,7 @@ func fastTiming() Timing {
 	return Timing{Poll: 50 * time.Millisecond, Ready: 15 * time.Second,
 		ImageTimeout: 3 * time.Second, ImageMax: 6 * time.Second, ImageSettle: 300 * time.Millisecond,
 		TextOnlyGrace: 500 * time.Millisecond, ChatTimeout: 3 * time.Second, ChatMax: 6 * time.Second,
-		// ChatForcePolls is ~18s in production (12 × 1.5s); 100 × 50ms keeps a comparable window.
-		ChatStable: 300 * time.Millisecond, ChatForcePolls: 100, ApprovalTimeout: 5 * time.Second,
+		ChatStable: 300 * time.Millisecond, ChatStuck: 5 * time.Second, ApprovalTimeout: 5 * time.Second,
 		Unresponsive: time.Second, TitleWait: time.Second}
 }
 

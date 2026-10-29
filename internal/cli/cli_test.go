@@ -476,7 +476,7 @@ func TestInstallCopiesSkills(t *testing.T) {
 	if code := h.run("", true, "install"); code != 0 {
 		t.Fatalf("code=%d stderr=%q", code, h.errOut.String())
 	}
-	for _, f := range []string{"SKILL.md", "speech.md", "image.md"} {
+	for _, f := range []string{"SKILL.md", "speech.md", "image.md", "video.md"} {
 		want, err := fs.ReadFile(skills.FS, "muse/"+f)
 		if err != nil {
 			t.Fatal(err)
@@ -503,7 +503,7 @@ func TestInstallCopiesSkills(t *testing.T) {
 	if code := h.run("", true, "uninstall"); code != 0 {
 		t.Fatalf("code=%d", code)
 	}
-	for _, f := range []string{"SKILL.md", "speech.md", "image.md"} {
+	for _, f := range []string{"SKILL.md", "speech.md", "image.md", "video.md"} {
 		if _, err := os.Stat(filepath.Join(skillDir, f)); !os.IsNotExist(err) {
 			t.Fatalf("%s still there: %v", f, err)
 		}

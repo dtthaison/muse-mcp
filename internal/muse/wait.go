@@ -18,7 +18,7 @@ type Timing struct {
 	ChatTimeout     time.Duration
 	ChatMax         time.Duration
 	ChatStable      time.Duration // reply unchanged and idle this long → done
-	ChatForcePolls  int           // reply unchanged for this many polls → done even if busy
+	ChatStuck       time.Duration // reply unchanged this long → done even if muse still looks busy
 	ApprovalTimeout time.Duration // unanswered approval → Deny
 	Unresponsive    time.Duration // page reads failing this long → the tab is gone
 	TitleWait       time.Duration // after a voice clip, wait this long for muse to name the chat
@@ -35,7 +35,7 @@ func DefaultTiming() Timing {
 		ChatTimeout:     5 * time.Minute,
 		ChatMax:         10 * time.Minute,
 		ChatStable:      3 * time.Second,
-		ChatForcePolls:  12,
+		ChatStuck:       2 * time.Minute,
 		ApprovalTimeout: 10 * time.Minute,
 		Unresponsive:    20 * time.Second,
 		TitleWait:       10 * time.Second,
@@ -180,7 +180,6 @@ type ChatWait struct {
 	lastCount   int
 	lastText    string
 	stableSince time.Time
-	stablePolls int
 	lastBusy    time.Time
 }
 
@@ -199,15 +198,14 @@ func (w *ChatWait) Step(s musepage.State, now time.Time) Verdict {
 	}
 	count, text := len(s.AgentTexts), lastOf(s.AgentTexts)
 	if count != w.lastCount || text != w.lastText {
-		w.lastCount, w.lastText, w.stableSince, w.stablePolls = count, text, now, 0
-	} else {
-		w.stablePolls++
+		w.lastCount, w.lastText, w.stableSince = count, text, now
 	}
+	// While muse shows its Stop button it is still working, even when its
+	// last message ("Checking the tool parameters…") hasn't changed for a
+	// while; only a Stop button stuck far longer than any step ends the wait.
 	if count > w.baseAgents && text != "" {
-		if !s.Busy && now.Sub(w.stableSince) >= w.t.ChatStable {
-			return Done
-		}
-		if w.stablePolls >= w.t.ChatForcePolls {
+		stable := now.Sub(w.stableSince)
+		if (!s.Busy && stable >= w.t.ChatStable) || stable >= w.t.ChatStuck {
 			return Done
 		}
 	}
@@ -221,7 +219,7 @@ func (w *ChatWait) Step(s musepage.State, now time.Time) Verdict {
 
 // Resume restarts the timeouts after the wait was parked on an approval.
 func (w *ChatWait) Resume(now time.Time) {
-	w.start, w.stableSince, w.stablePolls = now, now, 0
+	w.start, w.stableSince = now, now
 }
 
 // Reply is every agent message after the wait began, in order.

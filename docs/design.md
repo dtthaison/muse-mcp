@@ -143,6 +143,20 @@ are proven against the live site and are the best reference for the page logic.
   muse-mcp adds `edit_image` (attached first, "Edit image 1. Change only:
   …"), `keep`, `reference_roles` and `count` (1 to 4) as prompt wording,
   and the muse skill's image guide covers the rest.
+- **What muse's video tool takes** (muse's own answer, chat 1cd30cc9): a
+  prompt and ordered images only. Clips are about 10 seconds with no length
+  setting; no ratio, resolution, audio, negative-prompt, seed or style
+  setting; images are references, not an exact first frame, and there is no
+  first-and-last-frame mode; up to 6 videos per message. Blocked for the
+  owner's account and region (403, last checked by muse on 2026-10-21).
+- **Chat replies can pause behind a short message.** muse may post
+  "Checking the exact tool parameters…" and keep working, Stop button
+  showing, with that text unchanged for half a minute or more. Logged live:
+  the Stop button stayed up for the whole 40 s answer, including 36 s of an
+  empty reply bubble. So a chat is done when the reply is unchanged and the
+  Stop button gone, or unchanged for ChatStuck (2 minutes) whatever the
+  button says; the earlier rule (12 unchanged polls, about 18 s) cut such
+  replies short.
 - **Deleting a chat:** the chat switcher opens the side-chats panel. Its
   rows (`hatch-thread-row`) carry no chat ID and list only some chats, but
   the open chat's row has `aria-current="page"`. That row's "More thread

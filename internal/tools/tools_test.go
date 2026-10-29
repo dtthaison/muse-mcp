@@ -295,6 +295,22 @@ func TestGenerateVideo(t *testing.T) {
 	}
 }
 
+func TestGenerateVideoRolesAndKeep(t *testing.T) {
+	svc, _, cs := setup(t)
+	dir := t.TempDir()
+	photo := pngFile(t, dir, "bottle.png")
+	res, text := call(t, cs, "muse_generate_video", map[string]any{"output_path": "v.mp4",
+		"prompt": "The bottle rotates slowly clockwise on a turntable.", "reference_images": []string{photo},
+		"reference_roles": []string{"the product: shape, label and colours exact"}, "keep": "the label and colours"})
+	if res.IsError || len(svc.images) != 1 {
+		t.Fatalf("isError=%v text=%q", res.IsError, text)
+	}
+	got := svc.images[0].Text
+	if !strings.Contains(got, "Image 1 is the product: shape, label and colours exact.") || !strings.Contains(got, "Keep exactly: the label and colours.") {
+		t.Fatalf("prompt %q", got)
+	}
+}
+
 func TestGenerateSpeech(t *testing.T) {
 	svc, _, cs := setup(t)
 	res, text := call(t, cs, "muse_generate_speech", map[string]any{"output_dir": "clips", "text": "Xin chào các bạn",
