@@ -13,12 +13,15 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-var ErrLocked = errors.New("muse-mcp is already running in another session")
+var ErrLocked = errors.New("another muse-mcp (another Claude Code session or a muse-mcp command) is using your muse login; use muse there or quit it, then try again")
 
 type Options struct {
 	ExecPath   string
 	ProfileDir string
 	LockPath   string
+	// LockLater takes the lock when Chrome first starts instead of in New,
+	// so a server that never uses muse doesn't keep others out.
+	LockLater bool
 }
 
 // Browser starts Chrome lazily and relaunches it when it has died or when the
@@ -35,20 +38,36 @@ type Browser struct {
 	cancelBrowser context.CancelFunc
 }
 
-// New takes the profile lock. It does not start Chrome.
+// New takes the profile lock, unless LockLater is set. It does not start
+// Chrome.
 func New(opts Options) (*Browser, error) {
-	f, err := os.OpenFile(opts.LockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	b := &Browser{opts: opts}
+	if !opts.LockLater {
+		if err := b.lockLocked(); err != nil {
+			return nil, err
+		}
+	}
+	return b, nil
+}
+
+// lockLocked takes the profile lock if this Browser doesn't hold it yet.
+func (b *Browser) lockLocked() error {
+	if b.lock != nil {
+		return nil
+	}
+	f, err := os.OpenFile(b.opts.LockPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		f.Close()
 		if errors.Is(err, syscall.EWOULDBLOCK) {
-			return nil, ErrLocked
+			return ErrLocked
 		}
-		return nil, fmt.Errorf("locking %s: %w", opts.LockPath, err)
+		return fmt.Errorf("locking %s: %w", b.opts.LockPath, err)
 	}
-	return &Browser{opts: opts, lock: f}, nil
+	b.lock = f
+	return nil
 }
 
 // NewTab opens a new tab, starting (or restarting) Chrome first if needed.
@@ -133,6 +152,9 @@ func (b *Browser) ensureLocked() error {
 }
 
 func (b *Browser) launchLocked() error {
+	if err := b.lockLocked(); err != nil {
+		return err
+	}
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.ExecPath(b.opts.ExecPath),
 		chromedp.UserDataDir(b.opts.ProfileDir),

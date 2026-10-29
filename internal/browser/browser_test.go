@@ -65,6 +65,38 @@ func TestLockIsExclusive(t *testing.T) {
 	again.Close()
 }
 
+// A server takes the lock only when it first needs Chrome, so an idle session
+// never blocks another one.
+func TestLockLater(t *testing.T) {
+	lock := filepath.Join(t.TempDir(), "lock")
+	exe, err := FindChrome()
+	if err != nil {
+		t.Skip(err)
+	}
+	lazy, err := New(Options{ExecPath: exe, ProfileDir: t.TempDir(), LockPath: lock, LockLater: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lazy.Close()
+	cli, err := New(Options{ExecPath: exe, ProfileDir: t.TempDir(), LockPath: lock})
+	if err != nil {
+		t.Fatalf("an idle lazy browser blocked the lock: %v", err)
+	}
+	if _, _, err := lazy.NewTab(context.Background()); !errors.Is(err, ErrLocked) {
+		t.Fatalf("NewTab while locked: %v", err)
+	}
+	cli.Close()
+	tab, cancel, err := lazy.NewTab(context.Background())
+	if err != nil {
+		t.Fatalf("NewTab after the lock was freed: %v", err)
+	}
+	defer cancel()
+	_ = tab
+	if _, err := New(Options{ExecPath: exe, ProfileDir: t.TempDir(), LockPath: lock}); !errors.Is(err, ErrLocked) {
+		t.Fatalf("lock not held once Chrome runs: %v", err)
+	}
+}
+
 func TestLazyStartAndTab(t *testing.T) {
 	b := newBrowser(t, "")
 	if b.Running() {

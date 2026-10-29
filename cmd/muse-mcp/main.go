@@ -28,7 +28,7 @@ import (
 	"github.com/dtthaison/muse-mcp/internal/voices"
 )
 
-const version = "0.8.0"
+const version = "0.8.1"
 
 func main() {
 	os.Exit(run())
@@ -115,11 +115,10 @@ func serve(ctx context.Context, paths config.Paths, log *slog.Logger, lib *libra
 	log.Info("starting", "version", version)
 	var svc tools.Service
 	exe, findErr := browser.FindChrome()
-	br, err := browser.New(browser.Options{ExecPath: exe, ProfileDir: paths.Profile, LockPath: paths.Lock})
+	// The lock is taken on the first muse call, so a session that never uses
+	// muse doesn't keep the CLI or other sessions out.
+	br, err := browser.New(browser.Options{ExecPath: exe, ProfileDir: paths.Profile, LockPath: paths.Lock, LockLater: true})
 	switch {
-	case errors.Is(err, browser.ErrLocked):
-		log.Warn("profile locked by another muse-mcp")
-		svc = unavailable{err, chats.Load(paths.Chats)}
 	case err != nil:
 		return err
 	case findErr != nil:
@@ -143,7 +142,7 @@ func serve(ctx context.Context, paths config.Paths, log *slog.Logger, lib *libra
 }
 
 // unavailable answers every muse call with the reason muse can't be used
-// (another session holds the profile, or Chrome is missing). Saved references
+// (Chrome is missing). Saved references
 // and the list of chats still work.
 type unavailable struct {
 	err   error

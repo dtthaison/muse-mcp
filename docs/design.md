@@ -209,8 +209,11 @@ results.
   the `MUSE_CHROME` environment variable. Other OSes aren't required.
 - Remote debugging on 127.0.0.1 only, on a free port picked at launch.
 - A lock file in `~/.muse-mcp/` keeps a second `muse-mcp` (for example a second
-  Claude Code session) from using the same profile. The second instance's tools
-  return "muse-mcp is already running in another session".
+  Claude Code session) from using the same profile. The server takes it on its
+  first muse call, not at startup: every Claude Code session (including
+  headless `claude -p` runs) starts the server, and most never use muse. Once
+  taken, it's held until that server quits; another instance's muse calls
+  then fail with ErrLocked. CLI commands take it at once.
 - On a logged-out page, the relaunch from hidden to visible (§4.2) goes ahead
   even if approvals are pending. Logged out, nothing can be clicked anyway, and
   §4.4 covers losing them.
