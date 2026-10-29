@@ -92,7 +92,7 @@ func setup(t *testing.T) (*fakeService, *library.Store, *mcp.ClientSession) {
 	return svc, lib, connect(t, svc, lib)
 }
 
-func TestListsSevenTools(t *testing.T) {
+func TestListsTools(t *testing.T) {
 	_, _, cs := setup(t)
 	res, err := cs.ListTools(context.Background(), nil)
 	if err != nil {
@@ -106,7 +106,7 @@ func TestListsSevenTools(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	want := "muse_chat,muse_decide_approval,muse_delete_reference,muse_generate_image,muse_list_references,muse_save_reference,muse_status"
+	want := "muse_chat,muse_decide_approval,muse_delete_reference,muse_generate_image,muse_generate_video,muse_list_references,muse_save_reference,muse_status"
 	if strings.Join(names, ",") != want {
 		t.Fatalf("tools %v", names)
 	}
@@ -240,5 +240,21 @@ func TestChatAttachmentsChecked(t *testing.T) {
 	}
 	if got := svc.chats[0].Attachments; len(got) != 1 || got[0] != filepath.Join(dir, "a.png") {
 		t.Fatalf("attachments %q", got)
+	}
+}
+
+func TestGenerateVideo(t *testing.T) {
+	svc, _, cs := setup(t)
+	res, text := call(t, cs, "muse_generate_video", map[string]any{"output_path": "v.mp4", "prompt": "steam rising"})
+	if res.IsError || len(svc.images) != 1 {
+		t.Fatalf("isError=%v text=%q", res.IsError, text)
+	}
+	got := svc.images[0]
+	if !got.Video || got.OutputPath != "v.mp4" || !strings.Contains(got.Text, "Generate a video: steam rising") {
+		t.Fatalf("request %+v", got)
+	}
+	res, text = call(t, cs, "muse_generate_video", map[string]any{"output_path": "v.png", "prompt": "p"})
+	if !res.IsError || !strings.Contains(text, ".mp4") || len(svc.images) != 1 {
+		t.Fatalf("isError=%v text=%q", res.IsError, text)
 	}
 }

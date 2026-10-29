@@ -142,3 +142,20 @@ func TestAdHocReferenceMustBeImage(t *testing.T) {
 		}
 	}
 }
+
+func TestVideoWording(t *testing.T) {
+	b, err := Build(Input{Prompt: "a teapot with steam", Video: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contains(t, b.Text, "Generate a video: a teapot with steam")
+	contains(t, b.Text, "Attach the final video here in the chat as a single video.")
+	if strings.Contains(b.Text, "image") {
+		t.Fatalf("video prompt mentions an image:\n%s", b.Text)
+	}
+	b, _ = Build(Input{Change: "the steam stops", Video: true})
+	contains(t, b.Text, "Generate a new video. Change ONLY: the steam stops.")
+	if !strings.Contains(NudgeVideo, "video") {
+		t.Fatal(NudgeVideo)
+	}
+}

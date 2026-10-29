@@ -25,6 +25,7 @@ const (
 	selStop         = `button[aria-label*="Stop" i]`
 	selAgentBubble  = `div[class*="hatch-agent-bubble-bg"]`
 	selResultImage  = `[data-testid="hatch-chat-attachment-presentation-image"] img`
+	selResultVideo  = `[data-testid="hatch-chat-attachment-presentation-video"] video` // other <video>s on the page are decoration
 	selApprovalCard = `[data-testid="hatch-inline-approval-card"]`
 	selFileInput    = `input[type="file"]`
 	selRemoveChip   = `button[aria-label="Remove attachment"]`
@@ -48,7 +49,7 @@ var (
 	ErrNoButton  = errors.New("no matching button on the muse approval card; the card was left untouched")
 )
 
-// Image is a result image muse posted in the chat.
+// Image is a result image (or video) muse posted in the chat.
 type Image struct {
 	Src    string `json:"src"`
 	Width  int    `json:"width"`
@@ -69,6 +70,7 @@ type State struct {
 	Stalled    bool      `json:"stalled"`
 	AgentTexts []string  `json:"agentTexts"`
 	Images     []Image   `json:"images"`
+	Videos     []Image   `json:"videos"`
 	Approval   *Approval `json:"approval"`
 }
 
@@ -108,10 +110,12 @@ var snapshotJS = fmt.Sprintf(`(() => {
     agentTexts: [...document.querySelectorAll(%[4]s)].map(b => (b.innerText || '').trim()),
     images: [...document.querySelectorAll(%[5]s)].map(i => ({
       src: i.currentSrc || i.src || '', width: i.naturalWidth || 0, height: i.naturalHeight || 0 })),
+    videos: [...document.querySelectorAll(%[10]s)].map(v => ({
+      src: v.currentSrc || v.src || '', width: v.videoWidth || 0, height: v.videoHeight || 0 })),
     approval: card ? { text: (card.innerText || '').trim() } : null,
   };
 })()`, q(selInput), q(selHydration), q(selStop), q(selAgentBubble), q(selResultImage),
-	q(selApprovalCard), q(textLoggedOut), mustJSON(stallTexts), pendingCardJS)
+	q(selApprovalCard), q(textLoggedOut), mustJSON(stallTexts), pendingCardJS, q(selResultVideo))
 
 func mustJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
 
@@ -248,7 +252,8 @@ func waitEmpty(ctx context.Context) error {
 	return errors.New("message was not sent (the chat box still has text)")
 }
 
-// Download fetches a result image (usually a blob: URL) from inside the page.
+// Download fetches a result image or video (usually a blob: URL) from inside
+// the page.
 func Download(ctx context.Context, src string) ([]byte, error) {
 	js := fmt.Sprintf(`(async () => {
   const b = await (await fetch(%s)).blob();

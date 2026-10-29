@@ -47,7 +47,7 @@ func TestWaitImageDoneAfterSettle(t *testing.T) {
 	if v[3] != Continue || v[4] != Done {
 		t.Fatalf("verdicts %v", v)
 	}
-	if n := w.NewImages(done); len(n) != 1 || n[0].Src != "blob:x" {
+	if n := w.NewMedia(done); len(n) != 1 || n[0].Src != "blob:x" {
 		t.Fatalf("new images %v", n)
 	}
 }
@@ -66,7 +66,7 @@ func TestWaitImageIgnoresPreexistingImages(t *testing.T) {
 	if v := steps(w, repeat(base, 5)...); last(v) != Continue {
 		t.Fatalf("verdicts %v", v)
 	}
-	if n := w.NewImages(base); len(n) != 0 {
+	if n := w.NewMedia(base); len(n) != 0 {
 		t.Fatalf("new images %v", n)
 	}
 }
@@ -221,5 +221,30 @@ func TestDefaultTiming(t *testing.T) {
 		ChatForcePolls: 12, ApprovalTimeout: 10 * time.Minute, Unresponsive: 20 * time.Second}
 	if d != want {
 		t.Fatalf("got %+v", d)
+	}
+}
+
+func TestWaitVideoDoneOnVideoOnly(t *testing.T) {
+	base := musepage.State{Videos: []musepage.Image{img("blob:old")}}
+	w := NewVideoWait(base, waitTiming(), t0)
+	withImage := musepage.State{AgentTexts: []string{"Here"}, Images: []musepage.Image{img("blob:i")}, Videos: base.Videos}
+	if v := steps(w, repeat(withImage, 5)...); last(v) == Done {
+		t.Fatalf("an image finished a video wait: %v", v)
+	}
+	w = NewVideoWait(base, waitTiming(), t0)
+	done := musepage.State{AgentTexts: []string{"Here"}, Videos: []musepage.Image{img("blob:old"), img("blob:v")}}
+	if v := steps(w, repeat(done, 4)...); last(v) != Done {
+		t.Fatalf("verdicts %v", v)
+	}
+	if n := w.NewMedia(done); len(n) != 1 || n[0].Src != "blob:v" {
+		t.Fatalf("new videos %v", n)
+	}
+}
+
+func TestWaitChatNewVideos(t *testing.T) {
+	w := NewChatWait(musepage.State{Videos: []musepage.Image{img("blob:old")}}, waitTiming(), t0)
+	s := musepage.State{Videos: []musepage.Image{img("blob:old"), img("blob:v")}}
+	if n := w.NewVideos(s); len(n) != 1 || n[0].Src != "blob:v" {
+		t.Fatalf("new videos %v", n)
 	}
 }

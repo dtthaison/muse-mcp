@@ -424,3 +424,39 @@ func TestContinueWithUntrackedApprovalRefuses(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestGenerateVideoSavesFile(t *testing.T) {
+	f := newFixture(t, fastTiming())
+	res, err := f.svc.GenerateImage(context.Background(), ImageRequest{Text: "[fake:video] teapot", Video: true,
+		OutputPath: filepath.Join(f.out, "v.mp4")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The fake records webm, so the file keeps its real extension.
+	if res.Status != "done" || len(res.Images) != 0 || len(res.Videos) != 1 || res.Videos[0].Path != filepath.Join(f.out, "v.webm") {
+		t.Fatalf("result %+v", res)
+	}
+	if res.Videos[0].Width != 64 || res.Videos[0].Bytes == 0 {
+		t.Fatalf("video %+v", res.Videos[0])
+	}
+}
+
+func TestVideoNudgeAsksForVideo(t *testing.T) {
+	f := newFixture(t, fastTiming())
+	res, err := f.svc.GenerateImage(context.Background(), ImageRequest{Text: "[fake:textonly-video]", Video: true,
+		OutputPath: filepath.Join(f.out, "v.webm")})
+	if err != nil || len(res.Videos) != 1 {
+		t.Fatalf("%+v %v", res, err)
+	}
+}
+
+func TestChatSavesVideos(t *testing.T) {
+	f := newFixture(t, fastTiming())
+	res, err := f.svc.Chat(context.Background(), ChatRequest{Message: "[fake:video]", SaveImagesTo: f.out})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Videos) != 1 || res.Videos[0].Path != filepath.Join(f.out, "muse-reply.webm") {
+		t.Fatalf("result %+v", res)
+	}
+}

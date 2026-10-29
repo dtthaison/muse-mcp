@@ -29,10 +29,19 @@ var (
 	ErrUntrackedApproval = errors.New("this chat has an approval muse-mcp is not tracking (muse-mcp may have restarted); decide it in muse.ai first")
 )
 
-// RefusedError means muse answered with text and no image, even after the nudge.
-type RefusedError struct{ Reply string }
+// RefusedError means muse answered with text and no image (or video), even
+// after the nudge.
+type RefusedError struct {
+	Reply string
+	Video bool
+}
 
-func (e RefusedError) Error() string { return "muse replied without an image: " + e.Reply }
+func (e RefusedError) Error() string {
+	if e.Video {
+		return "muse replied without a video: " + e.Reply
+	}
+	return "muse replied without an image: " + e.Reply
+}
 
 const (
 	idleTabLimit  = 15 * time.Minute
@@ -53,6 +62,7 @@ type ImageRequest struct {
 	Text        string   // from prompt.Build
 	Attachments []string // from prompt.Build
 	OutputPath  string
+	Video       bool // a video (experimental) instead of an image
 }
 
 type ChatRequest struct {
@@ -75,6 +85,7 @@ type Result struct {
 	ChatURL  string           `json:"chat_url"`
 	Reply    string           `json:"reply"`
 	Images   []output.Saved   `json:"images,omitempty"`
+	Videos   []output.Saved   `json:"videos,omitempty"`
 	Approval *PendingApproval `json:"approval,omitempty"`
 }
 
@@ -151,7 +162,8 @@ func New(o Options) *Service {
 	return &Service{o: o, tabs: map[string]*tab{}, pending: map[string]*pending{}, timedOut: map[string]bool{}}
 }
 
-// GenerateImage sends a built image prompt in a fresh chat and saves the result.
+// GenerateImage sends a built image (or video) prompt in a fresh chat and saves
+// the result.
 func (s *Service) GenerateImage(ctx context.Context, r ImageRequest) (Result, error) {
 	s.call.Lock()
 	defer s.call.Unlock()
@@ -161,7 +173,11 @@ func (s *Service) GenerateImage(ctx context.Context, r ImageRequest) (Result, er
 	if err != nil {
 		return Result{}, err
 	}
-	return s.runImage(ctx, id, t, &r, NewImageWait(base, s.o.Timing, s.o.Now()))
+	w := NewImageWait(base, s.o.Timing, s.o.Now())
+	if r.Video {
+		w = NewVideoWait(base, s.o.Timing, s.o.Now())
+	}
+	return s.runImage(ctx, id, t, &r, w)
 }
 
 // Chat sends a message in a new chat, or continues one this server created.
@@ -370,22 +386,36 @@ func (s *Service) runImage(ctx context.Context, id string, t *tab, r *ImageReque
 		case NeedsApproval:
 			return s.park(id, t, *snap, res, &pending{image: r, iw: w}), nil
 		case Nudge:
-			s.o.Log.Info("text-only reply; asking for the image", "chat", id)
-			if err := musepage.Send(op, prompt.Nudge); err != nil {
+			s.o.Log.Info("text-only reply; asking for the result", "chat", id)
+			nudge := prompt.Nudge
+			if r.Video {
+				nudge = prompt.NudgeVideo
+			}
+			if err := musepage.Send(op, nudge); err != nil {
 				s.dropTab(id)
 				return Result{}, err
 			}
 			w.Nudged()
 		case Refused:
 			s.dropTab(id)
-			return Result{}, RefusedError{Reply: res.Reply}
+			return Result{}, RefusedError{Reply: res.Reply, Video: r.Video}
 		case TimedOut:
 			s.dropTab(id)
 			res.Status = "timeout"
 			return res, nil
 		case Done:
 			defer s.dropTab(id)
-			for _, im := range w.NewImages(*snap) {
+			for _, im := range w.NewMedia(*snap) {
+				if r.Video {
+					saved, err := s.download(op, im, func(data []byte) (output.Saved, error) {
+						return output.SaveVideo(data, r.OutputPath, im.Width, im.Height)
+					})
+					if err != nil {
+						return Result{}, err
+					}
+					res.Videos = append(res.Videos, saved)
+					continue
+				}
 				saved, err := s.download(op, im, func(data []byte) (output.Saved, error) { return output.Save(data, r.OutputPath) })
 				if err != nil {
 					return Result{}, err
@@ -428,6 +458,15 @@ func (s *Service) runChat(ctx context.Context, id string, t *tab, r *ChatRequest
 						return Result{}, err
 					}
 					res.Images = append(res.Images, saved)
+				}
+				for _, v := range w.NewVideos(*snap) {
+					saved, err := s.download(op, v, func(data []byte) (output.Saved, error) {
+						return output.SaveVideoInDir(data, r.SaveImagesTo, "muse-reply", v.Width, v.Height)
+					})
+					if err != nil {
+						return Result{}, err
+					}
+					res.Videos = append(res.Videos, saved)
 				}
 			}
 			s.mu.Lock()

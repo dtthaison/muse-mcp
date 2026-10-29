@@ -16,7 +16,8 @@
   (see internal/musepage/page.go). Keywords in a message pick a scenario:
   [fake:image] [fake:textonly] [fake:textonly-then-image] [fake:approval]
   [fake:approval-oddlabel] [fake:approval-sticky] [fake:send-trap] [fake:chat]
-  [fake:slow] [fake:echo-attachments]
+  [fake:slow] [fake:echo-attachments] [fake:video] [fake:textonly-video]
+  [fake:decor-video]
 -->
 <main><div id="log"></div></main>
 <div id="composer" data-hatch-shell-hydration-state="hydrating">
@@ -88,6 +89,39 @@ function image() {
   });
 }
 
+// video posts a short webm recorded from a canvas, inside the attachment
+// wrapper muse uses for videos.
+function video(attachment = true) {
+  return new Promise(resolve => {
+    const c = document.createElement('canvas');
+    c.width = 64; c.height = 48;
+    const g = c.getContext('2d');
+    const rec = new MediaRecorder(c.captureStream(10), { mimeType: 'video/webm' });
+    const chunks = [];
+    rec.ondataavailable = e => chunks.push(e.data);
+    let frame = 0;
+    const tick = setInterval(() => { g.fillStyle = frame++ % 2 ? 'blue' : 'red'; g.fillRect(0, 0, 64, 48); }, 50);
+    rec.onstop = () => {
+      clearInterval(tick);
+      const v = document.createElement('video');
+      v.muted = true;
+      v.preload = 'auto';
+      v.onloadedmetadata = resolve;
+      v.src = URL.createObjectURL(new Blob(chunks, { type: 'video/webm' }));
+      if (attachment) {
+        const wrap = document.createElement('div');
+        wrap.setAttribute('data-testid', 'hatch-chat-attachment-presentation-video');
+        wrap.appendChild(v);
+        log.appendChild(wrap);
+      } else {
+        log.appendChild(v);
+      }
+    };
+    rec.start();
+    setTimeout(() => rec.stop(), 500);
+  });
+}
+
 // sticky: the decided card stays in the chat with its buttons disabled.
 function approvalCard(approveLabel, onApprove, onDeny, sticky) {
   const card = document.createElement('div');
@@ -114,7 +148,7 @@ function approvalCard(approveLabel, onApprove, onDeny, sticky) {
 async function respond(text, names) {
   const m = text.match(/\[fake:([a-z-]+)\]/);
   if (m) mode = m[1];
-  const nudge = !m && text.includes('Please attach the final image');
+  const nudge = !m && text.includes('Please attach the final');
   const scenario = m ? m[1] : (nudge ? mode + ':nudge' : 'default');
   setBusy(true);
   await sleep(300);
@@ -127,6 +161,7 @@ async function respond(text, names) {
       break;
     case 'textonly':
     case 'textonly-then-image':
+    case 'textonly-video':
       bubble("I can't make that.");
       break;
     case 'textonly:nudge':
@@ -150,6 +185,19 @@ async function respond(text, names) {
       bubble('May I email this?');
       approvalCard('Send email', async () => { bubble('SENT EMAIL'); }, async () => { bubble('Not sending.'); });
       return;
+    case 'video':
+      bubble('Here is your video.');
+      await video();
+      break;
+    case 'textonly-video:nudge':
+      bubble('Here it is.');
+      await video();
+      break;
+    case 'decor-video':
+      // muse's page also has decorative videos outside chat attachments.
+      await video(false);
+      bubble('ok');
+      break;
     case 'chat': {
       const b = bubble('Hello');
       await sleep(300); b.textContent = 'Hello from';

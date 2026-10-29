@@ -37,11 +37,23 @@ type generateIn struct {
 	AspectRatio     string   `json:"aspect_ratio,omitempty" jsonschema:"e.g. 16:9, 1:1, 9:16"`
 }
 
+// videoIn has generateIn's fields; only output_path's formats differ.
+type videoIn struct {
+	OutputPath      string   `json:"output_path" jsonschema:"where to save the video: a .mp4 or .webm path; relative paths resolve against the project directory"`
+	Prompt          string   `json:"prompt,omitempty" jsonschema:"what to make (needed unless change is given)"`
+	Change          string   `json:"change,omitempty" jsonschema:"the one thing to change while keeping characters, scene, lighting, framing and style identical"`
+	Characters      []string `json:"characters,omitempty" jsonschema:"names of saved character references to attach"`
+	Scene           string   `json:"scene,omitempty" jsonschema:"name of a saved scene reference to attach"`
+	ReferenceImages []string `json:"reference_images,omitempty" jsonschema:"extra image files to attach as references (e.g. a first frame)"`
+	ReferenceNotes  string   `json:"reference_notes,omitempty" jsonschema:"what the extra reference images are for"`
+	AspectRatio     string   `json:"aspect_ratio,omitempty" jsonschema:"e.g. 16:9, 1:1, 9:16"`
+}
+
 type chatIn struct {
 	Message      string   `json:"message" jsonschema:"what to say to muse"`
 	ChatID       string   `json:"chat_id,omitempty" jsonschema:"chat_id from an earlier result, to continue that conversation"`
 	Attachments  []string `json:"attachments,omitempty" jsonschema:"files to attach to the message"`
-	SaveImagesTo string   `json:"save_images_to,omitempty" jsonschema:"directory to save any images muse sends back"`
+	SaveImagesTo string   `json:"save_images_to,omitempty" jsonschema:"directory to save any images or videos muse sends back"`
 }
 
 type decideIn struct {
@@ -75,6 +87,7 @@ type okOut struct {
 const (
 	descStatus   = `Check whether muse-mcp's Chrome is running, whether you are logged in to muse.ai, and list approvals waiting for the owner's decision.`
 	descGenerate = `Generate an image with muse.ai and save it to output_path (.png, .jpg or .webp). For recurring characters or scenes, pass their saved names in characters/scene so the same reference images are attached every time. To keep everything the same and change one thing, use change (e.g. "the fox is now asleep") instead of re-describing the scene. Takes about a minute.`
+	descVideo    = `EXPERIMENTAL, under testing. Generate a short video with muse.ai and save it to output_path (.mp4 or .webm). Same inputs as muse_generate_image. muse blocks AI video for some accounts and regions; it may then make a substitute (for example an animated still), so read the reply. Can take several minutes.`
 	descChat     = `Send a message to the owner's muse.ai agent and return its reply. Pass chat_id from an earlier result to continue that conversation. muse may ask to act on the owner's accounts; that comes back as status "needs_approval".`
 	descDecide   = `Approve or deny an action muse asked permission for. This is the owner's decision: only call it after the owner has told you which to choose for this specific approval.`
 	descSaveRef  = `Save a named character or scene (images + a fixed description) for consistent images later. Use kind "character" for who (face, markings, outfit) and "scene" for where (layout, lighting, style).`
@@ -82,7 +95,7 @@ const (
 	descDelRef   = `Delete a saved character or scene.`
 )
 
-// Register adds the seven muse tools to s.
+// Register adds the muse tools to s.
 func Register(s *mcp.Server, svc Service, lib *library.Store) {
 	mcp.AddTool(s, &mcp.Tool{Name: "muse_status", Description: descStatus},
 		func(ctx context.Context, _ *mcp.CallToolRequest, _ statusIn) (*mcp.CallToolResult, muse.StatusInfo, error) {
@@ -92,7 +105,17 @@ func Register(s *mcp.Server, svc Service, lib *library.Store) {
 
 	mcp.AddTool(s, &mcp.Tool{Name: "muse_generate_image", Description: descGenerate},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in generateIn) (*mcp.CallToolResult, muse.Result, error) {
-			req, err := buildImageRequest(lib, in)
+			req, err := buildImageRequest(lib, in, false)
+			if err != nil {
+				return nil, muse.Result{}, err
+			}
+			res, err := svc.GenerateImage(ctx, req)
+			return nil, res, err
+		})
+
+	mcp.AddTool(s, &mcp.Tool{Name: "muse_generate_video", Description: descVideo},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in videoIn) (*mcp.CallToolResult, muse.Result, error) {
+			req, err := buildImageRequest(lib, generateIn(in), true)
 			if err != nil {
 				return nil, muse.Result{}, err
 			}
@@ -146,12 +169,16 @@ func Register(s *mcp.Server, svc Service, lib *library.Store) {
 
 // buildImageRequest checks everything that can be checked before Chrome is
 // touched, so a mistake costs no muse quota.
-func buildImageRequest(lib *library.Store, in generateIn) (muse.ImageRequest, error) {
-	if err := output.CheckPath(in.OutputPath); err != nil {
+func buildImageRequest(lib *library.Store, in generateIn, video bool) (muse.ImageRequest, error) {
+	check := output.CheckPath
+	if video {
+		check = output.CheckVideoPath
+	}
+	if err := check(in.OutputPath); err != nil {
 		return muse.ImageRequest{}, err
 	}
 	pin := prompt.Input{Prompt: in.Prompt, Change: in.Change, References: in.ReferenceImages,
-		ReferenceNotes: in.ReferenceNotes, AspectRatio: in.AspectRatio}
+		ReferenceNotes: in.ReferenceNotes, AspectRatio: in.AspectRatio, Video: video}
 	for _, name := range in.Characters {
 		r, err := getRef(lib, name, library.Character)
 		if err != nil {
@@ -170,7 +197,7 @@ func buildImageRequest(lib *library.Store, in generateIn) (muse.ImageRequest, er
 	if err != nil {
 		return muse.ImageRequest{}, err
 	}
-	return muse.ImageRequest{Text: built.Text, Attachments: built.Attachments, OutputPath: in.OutputPath}, nil
+	return muse.ImageRequest{Text: built.Text, Attachments: built.Attachments, OutputPath: in.OutputPath, Video: video}, nil
 }
 
 // checkFiles requires every chat attachment to be an existing regular file

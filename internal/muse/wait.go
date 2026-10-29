@@ -70,11 +70,12 @@ func (c *idleClock) observe(busy bool, now time.Time) time.Duration {
 	return now.Sub(c.since)
 }
 
-// ImageWait decides when an image request is finished.
+// ImageWait decides when an image (or video) request is finished.
 type ImageWait struct {
 	t           Timing
+	media       func(musepage.State) []musepage.Image // the results it waits for
 	start       time.Time
-	baseImages  int
+	baseMedia   int
 	startAgents int // agent messages before the request; Reply starts after these
 	baseAgents  int // moves past the first reply once nudged
 	lastAgents  int
@@ -83,8 +84,17 @@ type ImageWait struct {
 }
 
 func NewImageWait(base musepage.State, t Timing, start time.Time) *ImageWait {
+	return newMediaWait(base, t, start, func(s musepage.State) []musepage.Image { return s.Images })
+}
+
+// NewVideoWait waits for a video the same way NewImageWait waits for an image.
+func NewVideoWait(base musepage.State, t Timing, start time.Time) *ImageWait {
+	return newMediaWait(base, t, start, func(s musepage.State) []musepage.Image { return s.Videos })
+}
+
+func newMediaWait(base musepage.State, t Timing, start time.Time, media func(musepage.State) []musepage.Image) *ImageWait {
 	n := len(base.AgentTexts)
-	return &ImageWait{t: t, start: start, baseImages: len(base.Images), startAgents: n, baseAgents: n, lastAgents: n}
+	return &ImageWait{t: t, media: media, start: start, baseMedia: len(media(base)), startAgents: n, baseAgents: n, lastAgents: n}
 }
 
 // Reply is everything muse wrote since the request was sent.
@@ -101,11 +111,11 @@ func (w *ImageWait) Step(s musepage.State, now time.Time) Verdict {
 	}
 	w.lastAgents = len(s.AgentTexts)
 	idleFor := w.idle.observe(s.Busy, now)
-	ready := w.NewImages(s)
+	ready := w.NewMedia(s)
 	if len(ready) > 0 && !s.Busy && idleFor >= w.t.ImageSettle {
 		return Done
 	}
-	pending := len(s.Images) > w.baseImages // includes images still loading
+	pending := len(w.media(s)) > w.baseMedia // includes results still loading
 	if len(s.AgentTexts) > w.baseAgents && !pending && !s.Busy && idleFor >= w.t.TextOnlyGrace {
 		if w.nudged {
 			return Refused
@@ -132,9 +142,9 @@ func (w *ImageWait) Nudged() {
 	w.idle = idleClock{}
 }
 
-// NewImages are result images posted after the wait began that have loaded.
-func (w *ImageWait) NewImages(s musepage.State) []musepage.Image {
-	return loaded(s.Images, w.baseImages)
+// NewMedia are results posted after the wait began that have loaded.
+func (w *ImageWait) NewMedia(s musepage.State) []musepage.Image {
+	return loaded(w.media(s), w.baseMedia)
 }
 
 // ChatWait decides when a chat reply is finished.
@@ -143,6 +153,7 @@ type ChatWait struct {
 	start       time.Time
 	baseAgents  int
 	baseImages  int
+	baseVideos  int
 	lastCount   int
 	lastText    string
 	stableSince time.Time
@@ -151,7 +162,8 @@ type ChatWait struct {
 
 func NewChatWait(base musepage.State, t Timing, start time.Time) *ChatWait {
 	return &ChatWait{t: t, start: start, baseAgents: len(base.AgentTexts), baseImages: len(base.Images),
-		lastCount: len(base.AgentTexts), lastText: lastOf(base.AgentTexts), stableSince: start}
+		baseVideos: len(base.Videos),
+		lastCount:  len(base.AgentTexts), lastText: lastOf(base.AgentTexts), stableSince: start}
 }
 
 func (w *ChatWait) Step(s musepage.State, now time.Time) Verdict {
@@ -194,6 +206,10 @@ func (w *ChatWait) Reply(s musepage.State) string {
 
 func (w *ChatWait) NewImages(s musepage.State) []musepage.Image {
 	return loaded(s.Images, w.baseImages)
+}
+
+func (w *ChatWait) NewVideos(s musepage.State) []musepage.Image {
+	return loaded(s.Videos, w.baseVideos)
 }
 
 func loaded(images []musepage.Image, base int) []musepage.Image {

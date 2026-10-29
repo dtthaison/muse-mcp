@@ -1,4 +1,4 @@
-// Package output writes generated images to disk in the format the file
+// Package output writes generated images and videos to disk in the format the file
 // extension asks for, never overwriting an existing file.
 package output
 
