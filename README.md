@@ -15,12 +15,14 @@ they're never copied, exported or logged.
 
 ## Requirements
 
-- Go 1.26 or later
+- macOS or Linux (Windows isn't supported)
 - Google Chrome (in `/Applications` on macOS, or `google-chrome`/`chromium` on
   `PATH`), or set `MUSE_CHROME` to its binary
 - A muse.ai account
+- Go 1.26 or later, unless you use a release binary
 
-Tested on macOS.
+Used daily on macOS. Linux builds and passes the tests in CI, but hasn't been
+used against the live site.
 
 ## Install
 
@@ -37,6 +39,20 @@ Claude how to write image and video prompts and speech scripts for muse, into `~
 `muse-voice` skill. `muse-mcp uninstall` removes both again (your login and saved
 references stay in `~/.muse-mcp`). Run `install` again after upgrading to get
 the newest skill.
+
+Without Go, download the macOS tarball for your Mac from the
+[latest release](https://github.com/dtthaison/muse-mcp/releases/latest)
+(Apple silicon: `darwin_arm64`; Intel: `darwin_amd64`), then:
+
+```sh
+shasum -a 256 -c checksums.txt --ignore-missing   # check the download
+tar xzf muse-mcp_*_darwin_arm64.tar.gz
+mv muse-mcp_*_darwin_arm64/muse-mcp /usr/local/bin/   # or anywhere on your PATH
+```
+
+The binaries aren't signed: if macOS blocks the first run, run
+`xattr -d com.apple.quarantine /usr/local/bin/muse-mcp` once. Then run
+`muse-mcp install` and `muse-mcp login` as above.
 
 From a clone, use `go build -o muse-mcp ./cmd/muse-mcp && ./muse-mcp install`.
 
@@ -240,6 +256,20 @@ approved). Open the chat in muse.ai to decide them there.
 - Relative `output_path`s resolve against the directory Claude Code started
   the server in.
 
+## Troubleshooting
+
+- **"Google Chrome not found"**: install Chrome, or set `MUSE_CHROME` to its
+  binary.
+- **"another muse-mcp … is using your muse login"**: one Chrome profile can
+  be used by one muse-mcp at a time. Use muse in the Claude Code session that
+  has it, or quit that session or `muse-mcp` command, then try again.
+- **Logged out, or muse.ai asks you to log in**: run `muse-mcp login`.
+- **"Something went wrong" or a request that never finishes**: muse.ai may
+  have changed its page. `muse-mcp status` shows what muse-mcp sees, and
+  `~/.muse-mcp/muse-mcp.log` has the details. Please open an issue.
+- **Tools missing in Claude Code**: run `muse-mcp install` again and restart
+  Claude Code, or run `/mcp`.
+
 ## Files
 
 Everything lives in `~/.muse-mcp/` (override with `MUSE_MCP_HOME`):
@@ -256,7 +286,13 @@ MUSE_LIVE=1 go test ./internal/muse/ -run Live -v -timeout 30m  # real muse.ai: 
 ```
 
 The live test waits up to 10 minutes for you to log in if the profile isn't
-logged in yet.
+logged in yet. The offline tests take about two minutes; most of it is
+`internal/muse` waiting the way it waits for muse.
+
+Release binaries are built with
+`GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' ./cmd/muse-mcp`
+(and `GOARCH=amd64`), each packed with `LICENSE` and `README.md`, plus a
+`checksums.txt` from `shasum -a 256`.
 
 Everything muse-mcp knows about the muse.ai page is in
 `internal/musepage/page.go`. When muse.ai changes, start there.

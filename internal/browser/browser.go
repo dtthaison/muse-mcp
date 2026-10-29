@@ -155,6 +155,8 @@ func (b *Browser) launchLocked() error {
 	if err := b.lockLocked(); err != nil {
 		return err
 	}
+	// chromedp talks to Chrome over a pipe; a remote-debugging port or address
+	// flag would open a port other programs could attach to.
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.ExecPath(b.opts.ExecPath),
 		chromedp.UserDataDir(b.opts.ProfileDir),
