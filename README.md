@@ -144,7 +144,7 @@ keeps the `.webm` extension.
 exact text you give and save it as `.mp3` in a folder (`output_dir`, `-o`;
 the current folder by default). The file is named after muse's chat:
 `<chat id>-<chat title>.mp3`, for example
-`5d0f89f3-d78e-4f1d-b212-5d62a3b3b8fe-Generate-Vietnamese-text-to-speech.mp3`,
+`123e4567-e89b-42d3-a456-426614174000-Generate-Vietnamese-text-to-speech.mp3`,
 or `<chat id>-speech.mp3` if muse hasn't named the chat. Pass a voice name (for example
 `Helio` or `Aria`) or leave it out and muse picks one.
 
@@ -253,6 +253,18 @@ Everything muse-mcp knows about the muse.ai page is in
 `internal/musepage/page.go`. When muse.ai changes, start there.
 [docs/design.md](docs/design.md) explains the design and what was learned
 from the live site.
+
+## Contributing
+
+Issues and pull requests are welcome. Run `go test ./...` before sending a
+change; it needs Chrome but not a muse.ai account. If muse.ai changed and
+something broke, say what the page shows now: the fix usually belongs in
+`internal/musepage/page.go`.
+
+## Security
+
+muse-mcp works with your logged-in muse.ai session. Report security problems
+privately, as [SECURITY.md](SECURITY.md) describes, not in a public issue.
 
 ## License
 

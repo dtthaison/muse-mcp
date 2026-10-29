@@ -1,7 +1,8 @@
 # muse-mcp — design
 
 Date: 2026-10-29
-Status: draft for review
+Status: describes the current version; sections 3 and 3a record what was
+learned from the live site.
 
 ## 1. Intent
 
@@ -10,12 +11,8 @@ Let Claude Code use the owner's own muse.ai account as a tool: generate images
 one thing) and chat with the muse agent. Today the only way to do this is by
 hand in the muse.ai web app.
 
-The owner looked at [muse2api](https://github.com/www222fff/muse2api), a Python
-gateway that exposes muse.ai as an OpenAI-compatible API, and chose **not** to
-run it: "rebuild from muse2api knowledge, for safety". The owner does not want
-someone else's code handling their muse.ai login. So this is a fresh Go
-implementation. muse2api is a reference for how the muse.ai page behaves, and
-none of its code is used or run.
+muse-mcp handles the owner's muse.ai login, so it is small, readable Go with
+no third-party code in that path.
 
 ## 2. Goals, non-goals, anti-goals
 
@@ -32,9 +29,9 @@ none of its code is used or run.
 - Login happens once, by the owner, in a Chrome window the server controls.
   Cookies are never copied, pasted or exported.
 
+Video and text-to-speech were added later as experimental tools (§3a).
+
 **Non-goals (for now)**
-- Video. muse.ai answered "video generation is blocked for this account" in
-  testing. Leave it out entirely; don't add a stub tool.
 - Multiple muse accounts, account pools, an HTTP/OpenAI API, a dashboard, API
   keys, quota reading.
 - Talking to muse.ai's backend without a browser (see §4: not feasible).
@@ -46,14 +43,11 @@ none of its code is used or run.
   files, sent anywhere). This includes response bodies: the spike's network log
   captured an access token from `/api/auth/check`, so the server must not log
   network bodies.
-- It interrupts or edits the owner's existing muse chats. The owner uses muse
-  for real work (for example posting to Facebook), and the server only ever
-  works in chats it created.
+- It interrupts or edits the owner's existing muse chats. Owners use muse for
+  real work (for example posting to their social accounts), and the server
+  only ever works in chats it created.
 
 ## 3. What the spike established (2026-10-29, Chrome 156, live account)
-
-Throwaway scripts are in `docs/spike/` (Node, raw CDP). They
-are proven against the live site and are the best reference for the page logic.
 
 - **muse.ai is a Meta product.** It is a chat-based agent ("hatch") with a cloud
   VM per account, and images come from Meta's Muse Image model (per third-party
@@ -64,7 +58,7 @@ are proven against the live site and are the best reference for the page logic.
   housekeeping: `/api/session`, `/api/hatch/vm/wake`, `/api/auth/check`,
   `/api/consent/status`, Meta logging (`/api/falco`), Sentry and Vercel. **So
   the server drives a real Chrome page.**
-- **Driving the page works**, using muse2api's selectors unchanged:
+- **Driving the page works**:
   - New chat: navigate to `https://muse.ai/thread/new`. Ready when a `textarea`
     exists, `[data-hatch-shell-hydration-state]` is `hydrated`, and the page
     text doesn't contain `Connecting...`. After sending, the URL becomes
@@ -82,13 +76,12 @@ are proven against the live site and are the best reference for the page logic.
   - Busy: a `button[aria-label*="Stop" i]` exists while muse is working.
   - Agent text: `div[class*="hatch-agent-bubble-bg"]` (one per agent message).
   - **Result images**: `[data-testid="hatch-chat-attachment-presentation-image"] img`
-    with a `blob:` src. They are **not** inside the agent bubble (muse2api's
-    code assumes nothing about this, but our first spike did and missed the
-    result). Download by running `fetch(blobUrl)` in the page and returning
+    with a `blob:` src. They are **not** inside the agent bubble (the first
+    spike assumed they were and missed the result). Download by running `fetch(blobUrl)` in the page and returning
     base64. Results were `image/webp`, 1920×1280, about 400 KB.
-  - Approval card: `[data-testid="hatch-inline-approval-card"]`. muse2api
-    clicks a button matching `/^(deny|decline|reject|don.t allow)$/i`. **The
-    Approve button's label is unverified**: no approval came up in the spike.
+  - Approval card: `[data-testid="hatch-inline-approval-card"]`. Deny is a
+    button matching `/^(deny|decline|reject|don.t allow)$/i`. **The Approve
+    button's label is unverified**: no approval came up in the spike.
   - Logged out: navigating anywhere lands on `https://muse.ai/` with the text
     "Log in or create an account".
 - **Timing:** about 35 to 50 seconds from send to finished image. Chat replies
@@ -143,7 +136,7 @@ are proven against the live site and are the best reference for the page logic.
   muse-mcp adds `edit_image` (attached first, "Edit image 1. Change only:
   …"), `keep`, `reference_roles` and `count` (1 to 4) as prompt wording,
   and the muse skill's image guide covers the rest.
-- **What muse's video tool takes** (muse's own answer, chat 1cd30cc9): a
+- **What muse's video tool takes** (muse's own answer in a chat): a
   prompt and ordered images only. Clips are about 10 seconds with no length
   setting; no ratio, resolution, audio, negative-prompt, seed or style
   setting; images are references, not an exact first frame, and there is no
@@ -267,8 +260,8 @@ request:
    server restarted); open the chat in muse.ai to decide it there", with the
    chat link. The safe failure is "not approved", never "approved".
 
-Image requests can hit approvals too: in muse2api's experience muse sometimes
-offers to upload the result as a public link. Same flow.
+Image requests can hit approvals too: muse may offer to upload the result as
+a public link. Same flow.
 
 ### 4.5 Reference library
 
@@ -322,12 +315,13 @@ single Go file) so it can be tuned from live testing.
 
 ### 4.7a Waiting for results (chat)
 
-- **Done** when the Stop button is gone, and the agent bubble count and last
-  bubble's text have stayed unchanged for about 3 seconds. This is muse2api's
-  rule: 4 stable polls when not busy, or a forced finish after 12 stable polls
-  even if the Stop button lingers. muse can pause between steps, so an early
-  finish is possible. The reply is everything the agent wrote after our
-  message: all new bubbles, joined in order.
+- **Done** when the Stop button is gone and the agent bubble count and last
+  bubble's text have stayed unchanged for about 3 seconds, or when they have
+  stayed unchanged for 2 minutes (ChatStuck) even if the Stop button lingers.
+  muse can sit on a short message ("Checking the exact tool parameters…")
+  for half a minute while it works, Stop button showing (§3a). The reply is
+  everything the agent wrote after our message: all new bubbles, joined in
+  order.
 - Approvals, attached images (saved if `save_images_to` is set) and the same
   waiting rules as images apply.
 - Timeout: 5 minutes, extended up to 10 minutes while muse is visibly working.
@@ -370,7 +364,7 @@ reference, muse refused) come back as clear tool errors with a next step.
 
 - Keep everything about the muse page (selectors, in-page scripts, text hints
   like "Log in or create an account") in **one file**. Site changes then need
-  a one-file fix (muse2api does the same).
+  a one-file fix.
 - Unit tests: prompt building, library storage, output-path handling, format
   conversion, chat-state bookkeeping.
 - Page-logic tests: a local fake muse page (static HTML/JS in `testdata/` that
@@ -395,8 +389,9 @@ encodes this.
 
 ## 8. Decided by the owner
 
-- Build a fresh implementation in Go; don't run muse2api (safety).
-- Scope: chat and images only; video out for now.
+- Build a fresh implementation in Go (safety: no third-party code handles the
+  login).
+- Scope: chat and images first; video and speech later, as experimental.
 - Approvals: the owner approves each one; the server never auto-approves.
 - Support both recurring characters/scenes and one-off images.
 - Log in in a separate Chrome profile (Claude-in-Chrome extension wasn't

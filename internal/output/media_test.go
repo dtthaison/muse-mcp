@@ -89,7 +89,7 @@ func TestSaveAudio(t *testing.T) {
 }
 
 func TestChatFileName(t *testing.T) {
-	const id = "d27cf279-6431-472e-b388-4d21316ca225"
+	const id = "123e4567-e89b-42d3-a456-426614174000"
 	for _, tc := range []struct{ title, want string }{
 		{"Generate Vietnamese text to speech", id + "-Generate-Vietnamese-text-to-speech"},
 		{"Giọng đọc: quán trà sữa / khai trương?", id + "-Giọng-đọc-quán-trà-sữa-khai-trương"},
