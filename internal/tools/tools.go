@@ -26,7 +26,9 @@ type Service interface {
 
 type statusIn struct{}
 
-type generateIn struct {
+// ImageArgs are the inputs of muse_generate_image (and of the CLI's image and
+// video commands).
+type ImageArgs struct {
 	OutputPath      string   `json:"output_path" jsonschema:"where to save the image: a .png, .jpg/.jpeg or .webp path; relative paths resolve against the project directory"`
 	Prompt          string   `json:"prompt,omitempty" jsonschema:"what to make (needed unless change is given)"`
 	Change          string   `json:"change,omitempty" jsonschema:"the one thing to change while keeping characters, scene, lighting, framing and style identical"`
@@ -37,7 +39,7 @@ type generateIn struct {
 	AspectRatio     string   `json:"aspect_ratio,omitempty" jsonschema:"e.g. 16:9, 1:1, 9:16"`
 }
 
-// videoIn has generateIn's fields; only output_path's formats differ.
+// videoIn has ImageArgs's fields; only output_path's formats differ.
 type videoIn struct {
 	OutputPath      string   `json:"output_path" jsonschema:"where to save the video: a .mp4 or .webm path; relative paths resolve against the project directory"`
 	Prompt          string   `json:"prompt,omitempty" jsonschema:"what to make (needed unless change is given)"`
@@ -104,8 +106,8 @@ func Register(s *mcp.Server, svc Service, lib *library.Store) {
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "muse_generate_image", Description: descGenerate},
-		func(ctx context.Context, _ *mcp.CallToolRequest, in generateIn) (*mcp.CallToolResult, muse.Result, error) {
-			req, err := buildImageRequest(lib, in, false)
+		func(ctx context.Context, _ *mcp.CallToolRequest, in ImageArgs) (*mcp.CallToolResult, muse.Result, error) {
+			req, err := BuildImageRequest(lib, in, false)
 			if err != nil {
 				return nil, muse.Result{}, err
 			}
@@ -115,7 +117,7 @@ func Register(s *mcp.Server, svc Service, lib *library.Store) {
 
 	mcp.AddTool(s, &mcp.Tool{Name: "muse_generate_video", Description: descVideo},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in videoIn) (*mcp.CallToolResult, muse.Result, error) {
-			req, err := buildImageRequest(lib, generateIn(in), true)
+			req, err := BuildImageRequest(lib, ImageArgs(in), true)
 			if err != nil {
 				return nil, muse.Result{}, err
 			}
@@ -125,7 +127,7 @@ func Register(s *mcp.Server, svc Service, lib *library.Store) {
 
 	mcp.AddTool(s, &mcp.Tool{Name: "muse_chat", Description: descChat},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in chatIn) (*mcp.CallToolResult, muse.Result, error) {
-			files, err := checkFiles(in.Attachments)
+			files, err := CheckFiles(in.Attachments)
 			if err != nil {
 				return nil, muse.Result{}, err
 			}
@@ -167,9 +169,9 @@ func Register(s *mcp.Server, svc Service, lib *library.Store) {
 		})
 }
 
-// buildImageRequest checks everything that can be checked before Chrome is
+// BuildImageRequest checks everything that can be checked before Chrome is
 // touched, so a mistake costs no muse quota.
-func buildImageRequest(lib *library.Store, in generateIn, video bool) (muse.ImageRequest, error) {
+func BuildImageRequest(lib *library.Store, in ImageArgs, video bool) (muse.ImageRequest, error) {
 	check := output.CheckPath
 	if video {
 		check = output.CheckVideoPath
@@ -200,9 +202,9 @@ func buildImageRequest(lib *library.Store, in generateIn, video bool) (muse.Imag
 	return muse.ImageRequest{Text: built.Text, Attachments: built.Attachments, OutputPath: in.OutputPath, Video: video}, nil
 }
 
-// checkFiles requires every chat attachment to be an existing regular file
+// CheckFiles requires every chat attachment to be an existing regular file
 // and returns their absolute paths.
-func checkFiles(paths []string) ([]string, error) {
+func CheckFiles(paths []string) ([]string, error) {
 	var abs []string
 	for _, p := range paths {
 		a, err := filepath.Abs(p)

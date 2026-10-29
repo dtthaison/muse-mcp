@@ -1,0 +1,321 @@
+package cli
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"image"
+	"image/png"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/dtthaison/muse-mcp/internal/library"
+	"github.com/dtthaison/muse-mcp/internal/muse"
+	"github.com/dtthaison/muse-mcp/internal/output"
+)
+
+type decision struct {
+	chatID, approvalID string
+	approve            bool
+}
+
+type fakeService struct {
+	images    []muse.ImageRequest
+	chats     []muse.ChatRequest
+	decisions []decision
+	logins    int
+	result    muse.Result // returned by GenerateImage and Chat
+	closed    bool
+}
+
+func (f *fakeService) GenerateImage(_ context.Context, r muse.ImageRequest) (muse.Result, error) {
+	f.images = append(f.images, r)
+	return f.result, nil
+}
+
+func (f *fakeService) Chat(_ context.Context, r muse.ChatRequest) (muse.Result, error) {
+	f.chats = append(f.chats, r)
+	return f.result, nil
+}
+
+func (f *fakeService) Decide(_ context.Context, chatID, approvalID string, approve bool) (muse.Result, error) {
+	f.decisions = append(f.decisions, decision{chatID, approvalID, approve})
+	return muse.Result{Status: "done", ChatID: chatID, Reply: "decided"}, nil
+}
+
+func (f *fakeService) Status(context.Context) (muse.StatusInfo, error) {
+	return muse.StatusInfo{ChromeRunning: true, LoggedIn: true, TrackedChats: 2, Pending: []muse.PendingApproval{}}, nil
+}
+
+func (f *fakeService) Login(context.Context) error {
+	f.logins++
+	return nil
+}
+
+type harness struct {
+	svc         *fakeService
+	lib         *library.Store
+	out, errOut bytes.Buffer
+	claude      [][]string
+	served      bool
+}
+
+func newHarness(t *testing.T) *harness {
+	t.Helper()
+	return &harness{svc: &fakeService{result: muse.Result{Status: "done", ChatID: "c1", ChatURL: "https://muse.ai/thread/c1", Reply: "Here you go."}},
+		lib: library.Open(filepath.Join(t.TempDir(), "library"))}
+}
+
+func (h *harness) run(stdin string, interactive bool, args ...string) int {
+	h.out.Reset()
+	h.errOut.Reset()
+	return Run(context.Background(), args, Env{
+		Stdin: strings.NewReader(stdin), Stdout: &h.out, Stderr: &h.errOut, Interactive: interactive,
+		Library: h.lib,
+		Muse: func() (Service, func(), error) {
+			return h.svc, func() { h.svc.closed = true }, nil
+		},
+		Serve:  func(context.Context) error { h.served = true; return nil },
+		Claude: func(_ context.Context, args ...string) error { h.claude = append(h.claude, args); return nil },
+		Exe:    "/opt/bin/muse-mcp",
+	})
+}
+
+func pngFile(t *testing.T, dir, name string) string {
+	t.Helper()
+	var b bytes.Buffer
+	png.Encode(&b, image.NewRGBA(image.Rect(0, 0, 2, 2)))
+	p := filepath.Join(dir, name)
+	if err := os.WriteFile(p, b.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestNoArgsServesWhenPiped(t *testing.T) {
+	h := newHarness(t)
+	if code := h.run("", false); code != 0 || !h.served {
+		t.Fatalf("code=%d served=%v", code, h.served)
+	}
+}
+
+func TestNoArgsInTerminalShowsUsage(t *testing.T) {
+	h := newHarness(t)
+	if code := h.run("", true); code != 2 || h.served || !strings.Contains(h.errOut.String(), "muse-mcp image") {
+		t.Fatalf("code=%d served=%v stderr=%q", code, h.served, h.errOut.String())
+	}
+}
+
+func TestUnknownCommand(t *testing.T) {
+	h := newHarness(t)
+	if code := h.run("", true, "paint"); code != 2 || !strings.Contains(h.errOut.String(), `unknown command "paint"`) {
+		t.Fatalf("code=%d stderr=%q", code, h.errOut.String())
+	}
+}
+
+func TestImage(t *testing.T) {
+	h := newHarness(t)
+	ref := pngFile(t, t.TempDir(), "r.png")
+	h.svc.result.Images = []output.Saved{{Path: "/w/fox.png", Width: 1920, Height: 1280, Bytes: 400 << 10}}
+	// Flags may come before or after the prompt.
+	code := h.run("", true, "image", "-o", "fox.png", "a red fox", "in snow", "--ref", ref, "--aspect", "16:9")
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, h.errOut.String())
+	}
+	got := h.svc.images[0]
+	if got.Video || got.OutputPath != "fox.png" || !strings.Contains(got.Text, "Generate an image: a red fox in snow Aspect ratio 16:9.") ||
+		len(got.Attachments) != 1 || got.Attachments[0] != ref {
+		t.Fatalf("request %+v", got)
+	}
+	if out := h.out.String(); !strings.Contains(out, "/w/fox.png (1920x1280") || !strings.Contains(out, "Here you go.") {
+		t.Fatalf("stdout %q", out)
+	}
+	if !h.svc.closed {
+		t.Fatal("muse not closed")
+	}
+}
+
+func TestImageWithSavedReferences(t *testing.T) {
+	h := newHarness(t)
+	if _, err := h.lib.Save("fox", library.Character, "a red fox", []string{pngFile(t, t.TempDir(), "f.png")}, false); err != nil {
+		t.Fatal(err)
+	}
+	if code := h.run("", true, "image", "-o", "x.png", "--character", "fox", "--change", "asleep"); code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, h.errOut.String())
+	}
+	if got := h.svc.images[0].Text; !strings.Contains(got, `character reference "fox"`) || !strings.Contains(got, "Change ONLY: asleep") {
+		t.Fatalf("text %q", got)
+	}
+}
+
+func TestImageValidatesBeforeMuse(t *testing.T) {
+	h := newHarness(t)
+	if code := h.run("", true, "image", "-o", "x.gif", "a fox"); code != 1 || len(h.svc.images) != 0 {
+		t.Fatalf("code=%d calls=%d", code, len(h.svc.images))
+	}
+	if code := h.run("", true, "image", "a fox"); code != 2 || !strings.Contains(h.errOut.String(), "-o") {
+		t.Fatalf("missing -o: code=%d stderr=%q", code, h.errOut.String())
+	}
+}
+
+func TestVideo(t *testing.T) {
+	h := newHarness(t)
+	h.svc.result.Videos = []output.Saved{{Path: "/w/v.webm", Width: 1920, Height: 1280, Bytes: 2 << 20}}
+	if code := h.run("", true, "video", "-o", "v.mp4", "steam rising"); code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, h.errOut.String())
+	}
+	if got := h.svc.images[0]; !got.Video || !strings.Contains(got.Text, "Generate a video: steam rising") {
+		t.Fatalf("request %+v", got)
+	}
+	if !strings.Contains(h.out.String(), "/w/v.webm") || !strings.Contains(h.errOut.String(), "experimental") {
+		t.Fatalf("stdout %q stderr %q", h.out.String(), h.errOut.String())
+	}
+}
+
+func TestChat(t *testing.T) {
+	h := newHarness(t)
+	dir := t.TempDir()
+	a := pngFile(t, dir, "a.png")
+	if code := h.run("", true, "chat", "--chat", "c1", "--attach", a, "--save", dir, "hello", "muse"); code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, h.errOut.String())
+	}
+	got := h.svc.chats[0]
+	if got.Message != "hello muse" || got.ChatID != "c1" || got.SaveImagesTo != dir || len(got.Attachments) != 1 {
+		t.Fatalf("request %+v", got)
+	}
+	if out := h.out.String(); !strings.Contains(out, "Here you go.") || !strings.Contains(out, "c1") {
+		t.Fatalf("stdout %q", out)
+	}
+}
+
+func TestJSONOutput(t *testing.T) {
+	h := newHarness(t)
+	if code := h.run("", true, "chat", "--json", "hi"); code != 0 {
+		t.Fatalf("code=%d", code)
+	}
+	var r muse.Result
+	if err := json.Unmarshal(h.out.Bytes(), &r); err != nil || r.Reply != "Here you go." {
+		t.Fatalf("stdout %q (%v)", h.out.String(), err)
+	}
+}
+
+func approvalResult() muse.Result {
+	return muse.Result{Status: "needs_approval", ChatID: "c1", ChatURL: "https://muse.ai/thread/c1",
+		Approval: &muse.PendingApproval{ChatID: "c1", ID: "c1-1", Text: "Post to Facebook"}}
+}
+
+func TestApprovalAskedInTerminal(t *testing.T) {
+	for _, tc := range []struct {
+		answer  string
+		approve bool
+	}{{"y\n", true}, {"yes\n", true}, {"n\n", false}, {"\n", false}, {"", false}} {
+		h := newHarness(t)
+		h.svc.result = approvalResult()
+		if code := h.run(tc.answer, true, "chat", "post it"); code != 0 {
+			t.Fatalf("%q: code=%d stderr=%q", tc.answer, code, h.errOut.String())
+		}
+		if len(h.svc.decisions) != 1 || h.svc.decisions[0] != (decision{"c1", "c1-1", tc.approve}) {
+			t.Fatalf("%q: decisions %+v", tc.answer, h.svc.decisions)
+		}
+		if !strings.Contains(h.errOut.String(), "Post to Facebook") {
+			t.Fatalf("%q: stderr %q", tc.answer, h.errOut.String())
+		}
+	}
+}
+
+func TestApprovalNeverDecidedWithoutTerminal(t *testing.T) {
+	h := newHarness(t)
+	h.svc.result = approvalResult()
+	if code := h.run("y\n", false, "chat", "post it"); code != 3 || len(h.svc.decisions) != 0 {
+		t.Fatalf("code=%d decisions=%+v", code, h.svc.decisions)
+	}
+	if !strings.Contains(h.errOut.String(), "https://muse.ai/thread/c1") {
+		t.Fatalf("stderr %q", h.errOut.String())
+	}
+}
+
+func TestTimeoutExitCode(t *testing.T) {
+	h := newHarness(t)
+	h.svc.result = muse.Result{Status: "timeout", ChatID: "c1", ChatURL: "https://muse.ai/thread/c1"}
+	if code := h.run("", true, "image", "-o", "x.png", "fox"); code != 1 || !strings.Contains(h.errOut.String(), "timed out") {
+		t.Fatalf("code=%d stderr=%q", code, h.errOut.String())
+	}
+}
+
+func TestLoginAndStatus(t *testing.T) {
+	h := newHarness(t)
+	if code := h.run("", true, "login"); code != 0 || h.svc.logins != 1 {
+		t.Fatalf("code=%d logins=%d", code, h.svc.logins)
+	}
+	if code := h.run("", true, "status"); code != 0 || !strings.Contains(h.out.String(), "logged in: yes") {
+		t.Fatalf("code=%d stdout=%q", code, h.out.String())
+	}
+}
+
+func TestInstallAndUninstall(t *testing.T) {
+	h := newHarness(t)
+	if code := h.run("", true, "install"); code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, h.errOut.String())
+	}
+	if code := h.run("", true, "install", "--scope", "project"); code != 0 {
+		t.Fatalf("code=%d", code)
+	}
+	if code := h.run("", true, "uninstall"); code != 0 {
+		t.Fatalf("code=%d", code)
+	}
+	want := []string{
+		"mcp add -s user muse -- /opt/bin/muse-mcp",
+		"mcp add -s project muse -- /opt/bin/muse-mcp",
+		"mcp remove -s user muse",
+	}
+	for i, w := range want {
+		if got := strings.Join(h.claude[i], " "); got != w {
+			t.Fatalf("claude call %d: %q, want %q", i, got, w)
+		}
+	}
+}
+
+func TestRefs(t *testing.T) {
+	h := newHarness(t)
+	img := pngFile(t, t.TempDir(), "f.png")
+	if code := h.run("", true, "refs", "save", "fox", "--kind", "character", "--desc", "a red fox", img); code != 0 {
+		t.Fatalf("save: code=%d stderr=%q", code, h.errOut.String())
+	}
+	if code := h.run("", true, "refs", "list"); code != 0 || !strings.Contains(h.out.String(), "fox (character): a red fox") {
+		t.Fatalf("list: code=%d stdout=%q", code, h.out.String())
+	}
+	if code := h.run("", true, "refs", "delete", "fox"); code != 0 {
+		t.Fatalf("delete: code=%d", code)
+	}
+	if refs, _ := h.lib.List(); len(refs) != 0 {
+		t.Fatalf("refs %+v", refs)
+	}
+}
+
+func TestReferenceCommandsDontStartMuse(t *testing.T) {
+	h := newHarness(t)
+	started := false
+	code := Run(context.Background(), []string{"refs", "list"}, Env{Stdout: &h.out, Stderr: &h.errOut, Library: h.lib,
+		Muse: func() (Service, func(), error) { started = true; return h.svc, func() {}, nil }})
+	if code != 0 || started {
+		t.Fatalf("code=%d started=%v", code, started)
+	}
+}
+
+type coldService struct{ fakeService }
+
+func (c *coldService) Status(context.Context) (muse.StatusInfo, error) {
+	return muse.StatusInfo{Pending: []muse.PendingApproval{}}, nil
+}
+
+func TestStatusBeforeChromeStarts(t *testing.T) {
+	h := newHarness(t)
+	var out bytes.Buffer
+	code := Run(context.Background(), []string{"status"}, Env{Stdout: &out, Stderr: &h.errOut, Library: h.lib,
+		Muse: func() (Service, func(), error) { return &coldService{}, func() {}, nil }})
+	if code != 0 || !strings.Contains(out.String(), "logged in: unknown") {
+		t.Fatalf("code=%d stdout=%q", code, out.String())
+	}
+}
