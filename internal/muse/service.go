@@ -29,18 +29,28 @@ var (
 	ErrUntrackedApproval = errors.New("this chat has an approval muse-mcp is not tracking (muse-mcp may have restarted); decide it in muse.ai first")
 )
 
-// RefusedError means muse answered with text and no image (or video), even
-// after the nudge.
+// Media is what a generation request makes.
+type Media string
+
+const (
+	MediaImage Media = "image"
+	MediaVideo Media = "video" // experimental
+	MediaVoice Media = "voice" // experimental: a text-to-speech audio clip
+)
+
+// RefusedError means muse answered with text and no result, even after the
+// nudge.
 type RefusedError struct {
 	Reply string
-	Video bool
+	Media Media
 }
 
 func (e RefusedError) Error() string {
-	if e.Video {
-		return "muse replied without a video: " + e.Reply
+	what := map[Media]string{MediaVideo: "a video", MediaVoice: "an audio clip"}[e.Media]
+	if what == "" {
+		what = "an image"
 	}
-	return "muse replied without an image: " + e.Reply
+	return "muse replied without " + what + ": " + e.Reply
 }
 
 const (
@@ -62,7 +72,7 @@ type ImageRequest struct {
 	Text        string   // from prompt.Build
 	Attachments []string // from prompt.Build
 	OutputPath  string
-	Video       bool // a video (experimental) instead of an image
+	Media       Media // "" means MediaImage
 }
 
 type ChatRequest struct {
@@ -86,6 +96,7 @@ type Result struct {
 	Reply    string           `json:"reply"`
 	Images   []output.Saved   `json:"images,omitempty"`
 	Videos   []output.Saved   `json:"videos,omitempty"`
+	Audio    []output.Saved   `json:"audio,omitempty"`
 	Approval *PendingApproval `json:"approval,omitempty"`
 }
 
@@ -162,8 +173,8 @@ func New(o Options) *Service {
 	return &Service{o: o, tabs: map[string]*tab{}, pending: map[string]*pending{}, timedOut: map[string]bool{}}
 }
 
-// GenerateImage sends a built image (or video) prompt in a fresh chat and saves
-// the result.
+// GenerateImage sends a built image, video or voice prompt in a fresh chat and
+// saves the result.
 func (s *Service) GenerateImage(ctx context.Context, r ImageRequest) (Result, error) {
 	s.call.Lock()
 	defer s.call.Unlock()
@@ -174,8 +185,11 @@ func (s *Service) GenerateImage(ctx context.Context, r ImageRequest) (Result, er
 		return Result{}, err
 	}
 	w := NewImageWait(base, s.o.Timing, s.o.Now())
-	if r.Video {
+	switch r.Media {
+	case MediaVideo:
 		w = NewVideoWait(base, s.o.Timing, s.o.Now())
+	case MediaVoice:
+		w = NewVoiceWait(base, s.o.Timing, s.o.Now())
 	}
 	return s.runImage(ctx, id, t, &r, w)
 }
@@ -416,9 +430,9 @@ func (s *Service) runImage(ctx context.Context, id string, t *tab, r *ImageReque
 			return s.park(id, t, *snap, res, &pending{image: r, iw: w}), nil
 		case Nudge:
 			s.o.Log.Info("text-only reply; asking for the result", "chat", id)
-			nudge := prompt.Nudge
-			if r.Video {
-				nudge = prompt.NudgeVideo
+			nudge := map[Media]string{MediaVideo: prompt.NudgeVideo, MediaVoice: prompt.NudgeVoice}[r.Media]
+			if nudge == "" {
+				nudge = prompt.Nudge
 			}
 			if err := musepage.Send(op, nudge); err != nil {
 				s.dropTab(id)
@@ -427,7 +441,7 @@ func (s *Service) runImage(ctx context.Context, id string, t *tab, r *ImageReque
 			w.Nudged()
 		case Refused:
 			s.dropTab(id)
-			return Result{}, RefusedError{Reply: res.Reply, Video: r.Video}
+			return Result{}, RefusedError{Reply: res.Reply, Media: r.Media}
 		case TimedOut:
 			s.dropTab(id)
 			res.Status = "timeout"
@@ -435,21 +449,20 @@ func (s *Service) runImage(ctx context.Context, id string, t *tab, r *ImageReque
 		case Done:
 			defer s.dropTab(id)
 			for _, im := range w.NewMedia(*snap) {
-				if r.Video {
-					saved, err := s.download(op, im, func(data []byte) (output.Saved, error) {
+				save, into := func(data []byte) (output.Saved, error) { return output.Save(data, r.OutputPath) }, &res.Images
+				switch r.Media {
+				case MediaVideo:
+					save, into = func(data []byte) (output.Saved, error) {
 						return output.SaveVideo(data, r.OutputPath, im.Width, im.Height)
-					})
-					if err != nil {
-						return Result{}, err
-					}
-					res.Videos = append(res.Videos, saved)
-					continue
+					}, &res.Videos
+				case MediaVoice:
+					save, into = func(data []byte) (output.Saved, error) { return output.SaveAudio(data, r.OutputPath) }, &res.Audio
 				}
-				saved, err := s.download(op, im, func(data []byte) (output.Saved, error) { return output.Save(data, r.OutputPath) })
+				saved, err := s.download(op, im, save)
 				if err != nil {
 					return Result{}, err
 				}
-				res.Images = append(res.Images, saved)
+				*into = append(*into, saved)
 			}
 			res.Status = "done"
 			return res, nil
@@ -496,6 +509,15 @@ func (s *Service) runChat(ctx context.Context, id string, t *tab, r *ChatRequest
 						return Result{}, err
 					}
 					res.Videos = append(res.Videos, saved)
+				}
+				for _, a := range w.NewAudios(*snap) {
+					saved, err := s.download(op, a, func(data []byte) (output.Saved, error) {
+						return output.SaveAudioInDir(data, r.SaveImagesTo, "muse-reply")
+					})
+					if err != nil {
+						return Result{}, err
+					}
+					res.Audio = append(res.Audio, saved)
 				}
 			}
 			s.mu.Lock()

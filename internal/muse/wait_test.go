@@ -248,3 +248,18 @@ func TestWaitChatNewVideos(t *testing.T) {
 		t.Fatalf("new videos %v", n)
 	}
 }
+
+func TestWaitVoiceDoneOnClip(t *testing.T) {
+	w := NewVoiceWait(musepage.State{}, waitTiming(), t0)
+	done := musepage.State{AgentTexts: []string{"Here"}, Audios: []musepage.Image{{Src: "audio:0"}}}
+	if v := steps(w, repeat(done, 4)...); last(v) != Done {
+		t.Fatalf("verdicts %v", v)
+	}
+	if n := w.NewMedia(done); len(n) != 1 || n[0].Src != "audio:0" {
+		t.Fatalf("new clips %v", n)
+	}
+	cw := NewChatWait(musepage.State{Audios: []musepage.Image{{Src: "audio:0"}}}, waitTiming(), t0)
+	if n := cw.NewAudios(musepage.State{Audios: []musepage.Image{{Src: "audio:0"}, {Src: "audio:1"}}}); len(n) != 1 || n[0].Src != "audio:1" {
+		t.Fatalf("chat clips %v", n)
+	}
+}

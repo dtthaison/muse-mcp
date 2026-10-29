@@ -14,6 +14,7 @@ import (
 	"github.com/dtthaison/muse-mcp/internal/library"
 	"github.com/dtthaison/muse-mcp/internal/muse"
 	"github.com/dtthaison/muse-mcp/internal/output"
+	"github.com/dtthaison/muse-mcp/internal/voices"
 )
 
 type decision struct {
@@ -57,6 +58,7 @@ func (f *fakeService) Login(context.Context) error {
 type harness struct {
 	svc         *fakeService
 	lib         *library.Store
+	voices      *voices.Catalog
 	out, errOut bytes.Buffer
 	claude      [][]string
 	served      bool
@@ -65,7 +67,7 @@ type harness struct {
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	return &harness{svc: &fakeService{result: muse.Result{Status: "done", ChatID: "c1", ChatURL: "https://muse.ai/thread/c1", Reply: "Here you go."}},
-		lib: library.Open(filepath.Join(t.TempDir(), "library"))}
+		lib: library.Open(filepath.Join(t.TempDir(), "library")), voices: voices.Open(filepath.Join(t.TempDir(), "voices.csv"))}
 }
 
 func (h *harness) run(stdin string, interactive bool, args ...string) int {
@@ -73,7 +75,7 @@ func (h *harness) run(stdin string, interactive bool, args ...string) int {
 	h.errOut.Reset()
 	return Run(context.Background(), args, Env{
 		Stdin: strings.NewReader(stdin), Stdout: &h.out, Stderr: &h.errOut, Interactive: interactive,
-		Library: h.lib,
+		Library: h.lib, Voices: h.voices,
 		Muse: func() (Service, func(), error) {
 			return h.svc, func() { h.svc.closed = true }, nil
 		},
@@ -125,7 +127,7 @@ func TestImage(t *testing.T) {
 		t.Fatalf("code=%d stderr=%q", code, h.errOut.String())
 	}
 	got := h.svc.images[0]
-	if got.Video || got.OutputPath != "fox.png" || !strings.Contains(got.Text, "Generate an image: a red fox in snow Aspect ratio 16:9.") ||
+	if got.Media != muse.MediaImage || got.OutputPath != "fox.png" || !strings.Contains(got.Text, "Generate an image: a red fox in snow Aspect ratio 16:9.") ||
 		len(got.Attachments) != 1 || got.Attachments[0] != ref {
 		t.Fatalf("request %+v", got)
 	}
@@ -166,7 +168,7 @@ func TestVideo(t *testing.T) {
 	if code := h.run("", true, "video", "-o", "v.mp4", "steam rising"); code != 0 {
 		t.Fatalf("code=%d stderr=%q", code, h.errOut.String())
 	}
-	if got := h.svc.images[0]; !got.Video || !strings.Contains(got.Text, "Generate a video: steam rising") {
+	if got := h.svc.images[0]; got.Media != muse.MediaVideo || !strings.Contains(got.Text, "Generate a video: steam rising") {
 		t.Fatalf("request %+v", got)
 	}
 	if !strings.Contains(h.out.String(), "/w/v.webm") || !strings.Contains(h.errOut.String(), "experimental") {
@@ -317,5 +319,36 @@ func TestStatusBeforeChromeStarts(t *testing.T) {
 		Muse: func() (Service, func(), error) { return &coldService{}, func() {}, nil }})
 	if code != 0 || !strings.Contains(out.String(), "logged in: unknown") {
 		t.Fatalf("code=%d stdout=%q", code, out.String())
+	}
+}
+
+func TestVoice(t *testing.T) {
+	h := newHarness(t)
+	h.svc.result.Audio = []output.Saved{{Path: "/w/hi.mp3", Bytes: 16 << 10}}
+	if code := h.run("", true, "voice", "-o", "hi.mp3", "--voice", "Helio", "--style", "calm", "Xin chào", "bạn"); code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, h.errOut.String())
+	}
+	got := h.svc.images[0]
+	if got.Media != muse.MediaVoice || !strings.Contains(got.Text, `with the voice "Helio"`) || !strings.Contains(got.Text, "Xin chào bạn") {
+		t.Fatalf("request %+v", got)
+	}
+	if !strings.Contains(h.out.String(), "saved /w/hi.mp3 (16 KB)") {
+		t.Fatalf("stdout %q", h.out.String())
+	}
+}
+
+func TestVoices(t *testing.T) {
+	h := newHarness(t)
+	if code := h.run("", true, "voices"); code != 1 || !strings.Contains(h.errOut.String(), "voices import") {
+		t.Fatalf("no catalog: code=%d stderr=%q", code, h.errOut.String())
+	}
+	src := filepath.Join(t.TempDir(), "voice-list.csv")
+	os.WriteFile(src, []byte("name,gender,accent,tone,description\nAria,F,American,Warm,Friendly\nLan,F,Vietnamese,Bright,Young\nHelio,M,American,Smooth,Calm\n"), 0o600)
+	if code := h.run("", true, "voices", "import", src); code != 0 || !strings.Contains(h.out.String(), "3 voices") {
+		t.Fatalf("import: code=%d stdout=%q stderr=%q", code, h.out.String(), h.errOut.String())
+	}
+	if code := h.run("", true, "voices", "--gender", "female", "--accent", "vietnamese"); code != 0 ||
+		!strings.Contains(h.out.String(), "Lan (F, Vietnamese, Bright): Young") || strings.Contains(h.out.String(), "Aria") {
+		t.Fatalf("search: code=%d stdout=%q", code, h.out.String())
 	}
 }

@@ -2,8 +2,8 @@
 
 An MCP server and command-line tool that lets Claude Code (or you) use **your
 own muse.ai account** to generate images (including the same character in the
-same scene with one thing changed) and to chat with your muse agent. Video is
-experimental.
+same scene with one thing changed), make voice clips, and chat with your muse
+agent. Video and voice are experimental.
 
 muse.ai has no public API, so muse-mcp drives a real Chrome window with a
 dedicated profile that you log in to once. Your cookies stay in that profile:
@@ -45,7 +45,9 @@ again." The window hides itself once muse.ai shows your chats.
 |---|---|
 | `muse_generate_image` | Makes an image and saves it to `output_path` (`.png`, `.jpg`/`.jpeg` or `.webp`). Takes about a minute. |
 | `muse_generate_video` | **Experimental, under testing.** Makes a short video and saves it to `output_path` (`.mp4` or `.webm`). See [Video](#video-experimental). |
-| `muse_chat` | Sends a message to your muse agent. Pass `chat_id` to continue a conversation; `save_images_to` saves any images or videos it sends. |
+| `muse_generate_voice` | **Experimental, under testing.** Makes a text-to-speech clip and saves it to `output_path` (`.mp3`). See [Voice](#voice-experimental). |
+| `muse_list_voices` | Searches muse's voice catalog by words, gender, accent or tone. |
+| `muse_chat` | Sends a message to your muse agent. Pass `chat_id` to continue a conversation; `save_images_to` saves any images, videos or audio clips it sends. |
 | `muse_decide_approval` | Approves or denies something muse asked permission to do. |
 | `muse_save_reference` / `muse_list_references` / `muse_delete_reference` | Saved characters and scenes. |
 | `muse_status` | Whether Chrome is running, whether you're logged in, and pending approvals. |
@@ -71,6 +73,8 @@ The same binary works without Claude Code:
 muse-mcp image -o fox.png "a red fox in a snowy forest"
 muse-mcp image -o fox-asleep.png --character fox --scene snowy-forest --change "the fox is asleep"
 muse-mcp video -o steam.mp4 --ref teapot.png "steam rises from the teapot"   # experimental
+muse-mcp voice -o hello.mp3 --voice Helio "Hello from muse."             # experimental
+muse-mcp voices --gender female --accent british warm
 muse-mcp chat "what can you do?"
 muse-mcp chat --chat <chat_id> --save out/ "make it red"
 muse-mcp refs save fox --kind character --desc "a red fox with a white chest" fox.png
@@ -95,6 +99,27 @@ itself (for example an animated still) and say so in the reply, or answer with
 text only, in which case the call fails with muse's reply. Videos are saved
 as muse sends them; if that is a `.webm` and you asked for `.mp4`, the file
 keeps the `.webm` extension.
+
+## Voice (experimental)
+
+`muse_generate_voice` and `muse-mcp voice` make a text-to-speech clip of the
+exact text you give and save it as `.mp3`. Pass a voice name (for example
+`Helio` or `Aria`) or leave it out and muse picks one; `style` says how to say
+it ("slow and calm").
+
+muse has a catalog of about 1,200 named voices. muse-mcp doesn't ship it.
+Ask muse once for "your voice catalog as a CSV file with name, gender, accent,
+tone and description", save the file it gives you, and import it:
+
+```sh
+muse-mcp voices import ~/Downloads/voice-list.csv
+muse-mcp voices --accent vietnamese
+```
+
+Then Claude can search it with `muse_list_voices` and pick a voice by name.
+
+muse's page has no download button for clips, so muse-mcp presses the clip's
+Play button in its hidden, muted Chrome and saves the audio muse loads.
 
 ## Approvals: you decide every one
 
@@ -124,7 +149,7 @@ approved). Open the chat in muse.ai to decide them there.
 
 Everything lives in `~/.muse-mcp/` (override with `MUSE_MCP_HOME`):
 `chrome-profile/` (your muse login), `library/` (saved references),
-`chats.json`, `muse-mcp.log`.
+`voices.csv` (the imported voice catalog), `chats.json`, `muse-mcp.log`.
 
 ## Development
 

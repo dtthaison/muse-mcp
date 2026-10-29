@@ -20,6 +20,7 @@ const MaxAttachments = 10
 const (
 	Nudge      = "Please attach the final image here in the chat, as a single image."
 	NudgeVideo = "Please attach the final video here in the chat, as a single video."
+	NudgeVoice = "Please attach the final audio clip here in the chat, as a single audio file."
 )
 
 // Input is what the caller asked for, with saved references already resolved.
@@ -116,6 +117,33 @@ func Build(in Input) (Built, error) {
 	b.WriteString("\n\n")
 	b.WriteString("Attach the final " + kind + " here in the chat as a single " + kind + ".")
 	return Built{Text: b.String(), Attachments: files}, nil
+}
+
+// VoiceInput is a text-to-speech request.
+type VoiceInput struct {
+	Text  string // said word for word
+	Voice string // a name from muse's voice catalog, e.g. "Helio"; empty lets muse pick
+	Style string // e.g. "slow and calm"
+}
+
+// Voice builds the text for a voice clip. Nothing is attached.
+func Voice(in VoiceInput) (Built, error) {
+	text := strings.TrimSpace(in.Text)
+	if text == "" {
+		return Built{}, errors.New("give the text to say")
+	}
+	var b strings.Builder
+	b.WriteString("Generate a voice clip (text to speech)")
+	if v := strings.TrimSpace(in.Voice); v != "" {
+		fmt.Fprintf(&b, " with the voice %q.", v)
+	} else {
+		b.WriteString(". Pick a voice that suits the text.")
+	}
+	if in.Style != "" {
+		fmt.Fprintf(&b, " Style: %s.", sentence(in.Style))
+	}
+	fmt.Fprintf(&b, "\nSay exactly this text, nothing more:\n\"\"\"\n%s\n\"\"\"\n\nAttach the final audio clip here in the chat as a single audio file.", text)
+	return Built{Text: b.String()}, nil
 }
 
 // sentence trims whitespace and a trailing full stop so templates can add one.

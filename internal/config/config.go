@@ -15,6 +15,7 @@ type Paths struct {
 	Profile string // dedicated Chrome profile the owner logs in to
 	Library string // saved character and scene references
 	Chats   string // chats.json: chats this server created
+	Voices  string // voices.csv: muse's voice catalog, imported by the owner
 	Log     string
 	Lock    string // keeps a second muse-mcp off the same profile
 }
@@ -35,6 +36,7 @@ func Load() (Paths, error) {
 		Profile: filepath.Join(root, "chrome-profile"),
 		Library: filepath.Join(root, "library"),
 		Chats:   filepath.Join(root, "chats.json"),
+		Voices:  filepath.Join(root, "voices.csv"),
 		Log:     filepath.Join(root, "muse-mcp.log"),
 		Lock:    filepath.Join(root, "lock"),
 	}

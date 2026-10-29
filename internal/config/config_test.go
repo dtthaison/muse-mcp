@@ -19,6 +19,7 @@ func TestLoadUsesEnvRoot(t *testing.T) {
 		Profile: filepath.Join(root, "chrome-profile"),
 		Library: filepath.Join(root, "library"),
 		Chats:   filepath.Join(root, "chats.json"),
+		Voices:  filepath.Join(root, "voices.csv"),
 		Log:     filepath.Join(root, "muse-mcp.log"),
 		Lock:    filepath.Join(root, "lock"),
 	}

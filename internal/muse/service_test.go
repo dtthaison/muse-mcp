@@ -427,7 +427,7 @@ func TestContinueWithUntrackedApprovalRefuses(t *testing.T) {
 
 func TestGenerateVideoSavesFile(t *testing.T) {
 	f := newFixture(t, fastTiming())
-	res, err := f.svc.GenerateImage(context.Background(), ImageRequest{Text: "[fake:video] teapot", Video: true,
+	res, err := f.svc.GenerateImage(context.Background(), ImageRequest{Text: "[fake:video] teapot", Media: MediaVideo,
 		OutputPath: filepath.Join(f.out, "v.mp4")})
 	if err != nil {
 		t.Fatal(err)
@@ -443,7 +443,7 @@ func TestGenerateVideoSavesFile(t *testing.T) {
 
 func TestVideoNudgeAsksForVideo(t *testing.T) {
 	f := newFixture(t, fastTiming())
-	res, err := f.svc.GenerateImage(context.Background(), ImageRequest{Text: "[fake:textonly-video]", Video: true,
+	res, err := f.svc.GenerateImage(context.Background(), ImageRequest{Text: "[fake:textonly-video]", Media: MediaVideo,
 		OutputPath: filepath.Join(f.out, "v.webm")})
 	if err != nil || len(res.Videos) != 1 {
 		t.Fatalf("%+v %v", res, err)
@@ -494,5 +494,31 @@ func TestLoginWaitsForOwner(t *testing.T) {
 	}
 	if st, _ := f.svc.Status(context.Background()); !st.LoggedIn || st.Visible {
 		t.Fatalf("status %+v", st)
+	}
+}
+
+func TestGenerateVoiceSavesFile(t *testing.T) {
+	f := newFixture(t, fastTiming())
+	res, err := f.svc.GenerateImage(context.Background(), ImageRequest{Text: "[fake:voice] hello", Media: MediaVoice,
+		OutputPath: filepath.Join(f.out, "hello.mp3")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "done" || res.Reply != "Here is your clip." || len(res.Audio) != 1 || res.Audio[0].Path != filepath.Join(f.out, "hello.mp3") {
+		t.Fatalf("result %+v", res)
+	}
+	if data, _ := os.ReadFile(res.Audio[0].Path); !bytes.Contains(data, []byte("clip-0")) {
+		t.Fatalf("file %q", data)
+	}
+}
+
+func TestChatSavesAudio(t *testing.T) {
+	f := newFixture(t, fastTiming())
+	res, err := f.svc.Chat(context.Background(), ChatRequest{Message: "[fake:voices]", SaveImagesTo: f.out})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Audio) != 2 || res.Audio[0].Path != filepath.Join(f.out, "muse-reply.mp3") || res.Audio[1].Path != filepath.Join(f.out, "muse-reply-1.mp3") {
+		t.Fatalf("result %+v", res)
 	}
 }

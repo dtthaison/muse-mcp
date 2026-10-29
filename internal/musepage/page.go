@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,6 +27,9 @@ const (
 	selAgentBubble  = `div[class*="hatch-agent-bubble-bg"]`
 	selResultImage  = `[data-testid="hatch-chat-attachment-presentation-image"] img`
 	selResultVideo  = `[data-testid="hatch-chat-attachment-presentation-video"] video` // other <video>s on the page are decoration
+	selResultAudio  = `[data-testid="hatch-chat-attachment-presentation-audio"]`       // a player card; no <audio> until Play
+	selAttachment   = `[data-testid^="hatch-chat-attachment-presentation-"]`
+	selPlay         = `button[aria-label="Play"]`
 	selApprovalCard = `[data-testid="hatch-inline-approval-card"]`
 	selFileInput    = `input[type="file"]`
 	selRemoveChip   = `button[aria-label="Remove attachment"]`
@@ -49,7 +53,9 @@ var (
 	ErrNoButton  = errors.New("no matching button on the muse approval card; the card was left untouched")
 )
 
-// Image is a result image (or video) muse posted in the chat.
+// Image is a result image, video or audio clip muse posted in the chat. An
+// audio clip has no URL until it is played, so its Src is "audio:<n>", the
+// clip's position on the page; Download understands it.
 type Image struct {
 	Src    string `json:"src"`
 	Width  int    `json:"width"`
@@ -71,6 +77,7 @@ type State struct {
 	AgentTexts []string  `json:"agentTexts"`
 	Images     []Image   `json:"images"`
 	Videos     []Image   `json:"videos"`
+	Audios     []Image   `json:"audios"`
 	Approval   *Approval `json:"approval"`
 }
 
@@ -107,15 +114,16 @@ var snapshotJS = fmt.Sprintf(`(() => {
     loggedOut: !input && body.includes(%[7]s),
     busy: !!document.querySelector(%[3]s),
     stalled: %[8]s.some(t => body.includes(t)),
-    agentTexts: [...document.querySelectorAll(%[4]s)].map(b => (b.innerText || '').trim()),
+    agentTexts: [...document.querySelectorAll(%[4]s)].filter(b => !b.closest(%[11]s)).map(b => (b.innerText || '').trim()),
     images: [...document.querySelectorAll(%[5]s)].map(i => ({
       src: i.currentSrc || i.src || '', width: i.naturalWidth || 0, height: i.naturalHeight || 0 })),
     videos: [...document.querySelectorAll(%[10]s)].map(v => ({
       src: v.currentSrc || v.src || '', width: v.videoWidth || 0, height: v.videoHeight || 0 })),
+    audios: [...document.querySelectorAll(%[12]s)].map((a, i) => ({ src: 'audio:' + i, width: 0, height: 0 })),
     approval: card ? { text: (card.innerText || '').trim() } : null,
   };
 })()`, q(selInput), q(selHydration), q(selStop), q(selAgentBubble), q(selResultImage),
-	q(selApprovalCard), q(textLoggedOut), mustJSON(stallTexts), pendingCardJS, q(selResultVideo))
+	q(selApprovalCard), q(textLoggedOut), mustJSON(stallTexts), pendingCardJS, q(selResultVideo), q(selAttachment), q(selResultAudio))
 
 func mustJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
 
@@ -252,16 +260,47 @@ func waitEmpty(ctx context.Context) error {
 	return errors.New("message was not sent (the chat box still has text)")
 }
 
-// Download fetches a result image or video (usually a blob: URL) from inside
-// the page.
-func Download(ctx context.Context, src string) ([]byte, error) {
-	js := fmt.Sprintf(`(async () => {
-  const b = await (await fetch(%s)).blob();
-  const u = new Uint8Array(await b.arrayBuffer());
+const toBase64JS = `async src => {
+  const u = new Uint8Array(await (await (await fetch(src)).blob()).arrayBuffer());
   let s = '';
   for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
   return btoa(s);
-})()`, q(src))
+}`
+
+// audioSrcJS clicks Play on audio clip n and returns the blob URL muse loads
+// into its page-wide player, which it pauses at once.
+var audioSrcJS = fmt.Sprintf(`async n => {
+  const card = document.querySelectorAll(%s)[n];
+  const play = card && card.querySelector(%s);
+  if (!play) return '';
+  const srcOf = a => a.currentSrc || a.src || '';
+  const before = new Set([...document.querySelectorAll('audio')].map(srcOf));
+  play.click();
+  for (let t = 0; t < 100; t++) {
+    await new Promise(r => setTimeout(r, 100));
+    const a = [...document.querySelectorAll('audio')].find(a => srcOf(a).startsWith('blob:') && (!before.has(srcOf(a)) || !a.paused));
+    if (a) { a.pause(); return srcOf(a); }
+  }
+  return '';
+}`, q(selResultAudio), q(selPlay))
+
+// Download fetches a result image, video or audio clip from inside the page.
+// Images and videos have blob: URLs; an audio clip ("audio:<n>") is played
+// to get one.
+func Download(ctx context.Context, src string) ([]byte, error) {
+	srcJS := q(src)
+	if rest, ok := strings.CutPrefix(src, "audio:"); ok {
+		n, err := strconv.Atoi(rest)
+		if err != nil || n < 0 {
+			return nil, fmt.Errorf("bad audio clip %q", src)
+		}
+		srcJS = fmt.Sprintf(`await (%s)(%d)`, audioSrcJS, n)
+	}
+	js := fmt.Sprintf(`(async () => {
+  const src = %s;
+  if (!src) throw new Error('muse did not load the audio clip');
+  return (%s)(src);
+})()`, srcJS, toBase64JS)
 	b64, err := chromedp.Run(ctx, chromedp.Evaluate[string](js, chromedp.EvalAwaitPromise))
 	if err != nil {
 		return nil, fmt.Errorf("downloading image: %w", err)

@@ -63,3 +63,26 @@ func TestSaveVideoInDir(t *testing.T) {
 		t.Fatalf("%+v %v", s, err)
 	}
 }
+
+var mp3Bytes = append([]byte("ID3\x03\x00\x00\x00\x00\x00\x1b"), make([]byte, 32)...)
+
+func TestSaveAudio(t *testing.T) {
+	dir := t.TempDir()
+	if err := CheckAudioPath("a.MP3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckAudioPath("a.mp4"); err == nil {
+		t.Fatal("want error for .mp4")
+	}
+	s, err := SaveAudio(mp3Bytes, filepath.Join(dir, "hello.mp3"))
+	if err != nil || s.Path != filepath.Join(dir, "hello.mp3") || s.Bytes != len(mp3Bytes) {
+		t.Fatalf("%+v %v", s, err)
+	}
+	if _, err := SaveAudio(webmBytes, filepath.Join(dir, "x.mp3")); err == nil {
+		t.Fatal("saved a video as audio")
+	}
+	s, err = SaveAudioInDir(mp3Bytes, dir, "muse-reply")
+	if err != nil || s.Path != filepath.Join(dir, "muse-reply.mp3") {
+		t.Fatalf("%+v %v", s, err)
+	}
+}
