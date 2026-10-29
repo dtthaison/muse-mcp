@@ -8,14 +8,32 @@ muse.ai has no public API, so muse-mcp drives a real Chrome window with a
 dedicated profile that you log in to once. Your cookies stay in that profile:
 they're never copied, exported or logged.
 
+> muse-mcp is an unofficial, independent project. It is not affiliated with or
+> endorsed by Meta or muse.ai. It automates your own account for your own use;
+> you are responsible for following muse.ai's terms.
+
+## Requirements
+
+- Go 1.26 or later
+- Google Chrome (in `/Applications` on macOS, or `google-chrome`/`chromium` on
+  `PATH`), or set `MUSE_CHROME` to its binary
+- A muse.ai account
+
+Tested on macOS.
+
 ## Install
+
+```sh
+go install github.com/dtthaison/muse-mcp/cmd/muse-mcp@latest
+claude mcp add -s user muse -- "$(go env GOPATH)/bin/muse-mcp"
+```
+
+Or from a clone:
 
 ```sh
 go build -o muse-mcp ./cmd/muse-mcp
 claude mcp add -s user muse -- "$PWD/muse-mcp"
 ```
-
-You need Google Chrome in `/Applications`, or set `MUSE_CHROME` to its binary.
 
 ## First login
 
@@ -68,8 +86,8 @@ approved). Open the chat in muse.ai to decide them there.
 - Every request adds a chat to your muse chat list.
 - muse-mcp only continues chats it started itself. It never touches yours.
 - One request runs at a time.
-- Video isn't supported (muse blocked video for the account this was built
-  on).
+- Video isn't supported. Where muse blocks AI video for an account, it may
+  render a substitute itself; muse-mcp saves only images.
 - Relative `output_path`s resolve against the directory Claude Code started
   the server in.
 
@@ -92,3 +110,9 @@ logged in yet.
 
 Everything muse-mcp knows about the muse.ai page is in
 `internal/musepage/page.go`. When muse.ai changes, start there.
+[docs/design.md](docs/design.md) explains the design and what was learned
+from the live site.
+
+## License
+
+[MIT](LICENSE)

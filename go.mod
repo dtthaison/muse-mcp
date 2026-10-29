@@ -1,4 +1,4 @@
-module pp/muse-mcp
+module github.com/dtthaison/muse-mcp
 
 go 1.26.4
 

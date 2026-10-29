@@ -10,10 +10,10 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"pp/muse-mcp/internal/library"
-	"pp/muse-mcp/internal/muse"
-	"pp/muse-mcp/internal/output"
-	"pp/muse-mcp/internal/prompt"
+	"github.com/dtthaison/muse-mcp/internal/library"
+	"github.com/dtthaison/muse-mcp/internal/muse"
+	"github.com/dtthaison/muse-mcp/internal/output"
+	"github.com/dtthaison/muse-mcp/internal/prompt"
 )
 
 // Service is the part of muse.Service the tools use.

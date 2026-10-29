@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"pp/muse-mcp/internal/library"
+	"github.com/dtthaison/muse-mcp/internal/library"
 )
 
 func touch(t *testing.T, dir, name string) string {

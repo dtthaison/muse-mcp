@@ -13,12 +13,12 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"pp/muse-mcp/internal/browser"
-	"pp/muse-mcp/internal/chats"
-	"pp/muse-mcp/internal/config"
-	"pp/muse-mcp/internal/library"
-	"pp/muse-mcp/internal/muse"
-	"pp/muse-mcp/internal/tools"
+	"github.com/dtthaison/muse-mcp/internal/browser"
+	"github.com/dtthaison/muse-mcp/internal/chats"
+	"github.com/dtthaison/muse-mcp/internal/config"
+	"github.com/dtthaison/muse-mcp/internal/library"
+	"github.com/dtthaison/muse-mcp/internal/muse"
+	"github.com/dtthaison/muse-mcp/internal/tools"
 )
 
 const version = "0.1.0"

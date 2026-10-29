@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"pp/muse-mcp/internal/browser"
-	"pp/muse-mcp/internal/chats"
-	"pp/muse-mcp/internal/config"
-	"pp/muse-mcp/internal/prompt"
+	"github.com/dtthaison/muse-mcp/internal/browser"
+	"github.com/dtthaison/muse-mcp/internal/chats"
+	"github.com/dtthaison/muse-mcp/internal/config"
+	"github.com/dtthaison/muse-mcp/internal/prompt"
 )
 
 // Live tests run against the real muse.ai with the owner's profile. They use

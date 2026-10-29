@@ -4,10 +4,10 @@ import (
 	"strings"
 	"time"
 
-	"pp/muse-mcp/internal/musepage"
+	"github.com/dtthaison/muse-mcp/internal/musepage"
 )
 
-// Timing holds every wait and poll duration (design doc §4.4, §4.7, §4.7a).
+// Timing holds every wait and poll duration (docs/design.md §4.4, §4.7, §4.7a).
 type Timing struct {
 	Poll            time.Duration
 	Ready           time.Duration // page load until the chat box is usable

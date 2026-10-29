@@ -13,11 +13,11 @@ import (
 
 	"github.com/chromedp/chromedp"
 
-	"pp/muse-mcp/internal/browser"
-	"pp/muse-mcp/internal/chats"
-	"pp/muse-mcp/internal/musepage"
-	"pp/muse-mcp/internal/output"
-	"pp/muse-mcp/internal/prompt"
+	"github.com/dtthaison/muse-mcp/internal/browser"
+	"github.com/dtthaison/muse-mcp/internal/chats"
+	"github.com/dtthaison/muse-mcp/internal/musepage"
+	"github.com/dtthaison/muse-mcp/internal/output"
+	"github.com/dtthaison/muse-mcp/internal/prompt"
 )
 
 var (
