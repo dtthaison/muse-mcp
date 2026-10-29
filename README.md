@@ -132,10 +132,16 @@ muse-mcp voice -o open.mp3 --voice "Sparkling Whistle" --language "Vietnamese (v
 muse-mcp always sends a speed (100 if you give none); without one, muse
 picks its own from the wording.
 
+For speech that should sound like a real person talking, the script needs a
+few humanizer words: one every two or three sentences ("well", "haha",
+"ừm", "à", "ủa", "na ja"), a "..." for a pause, contractions in English.
+Leave them out of formal announcements. The `muse-voice` skill has the
+lists for English, Vietnamese and German.
+
 Write the script as it should sound: numbers, prices and dates in words, no
-links, emoji, markdown, tags, stage directions or speaker labels, and Vietnamese
-with full tone marks. muse-mcp checks for these before asking muse and refuses
-a script that has them (no quota used); `ignore_script_warnings` (`--force` on
+links, emoji, markdown, tags, phrases in capitals, stage directions or speaker
+labels, and Vietnamese with full tone marks. muse-mcp checks for these before
+asking muse and refuses a script that has them (no quota used); `ignore_script_warnings` (`--force` on
 the command line) sends it anyway.
 
 If you publish a clip, say that the voice is AI-generated.

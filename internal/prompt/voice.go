@@ -56,6 +56,7 @@ var (
 	bracketRE = regexp.MustCompile(`[\[\]<>{}]`)
 	mdRE      = regexp.MustCompile("\\*\\*|__|`|(?m)^\\s*(#{1,6}\\s|[-*]\\s)")
 	speakerRE = regexp.MustCompile(`(?m)^\s*\p{Lu}[\p{L} ]{0,20}:\s`)
+	shoutRE   = regexp.MustCompile(`(?:^|\P{L})\p{Lu}{2,}\s+\p{Lu}{2,}(?:\P{L}|$)`) // two capitalised words in a row; one acronym is fine
 )
 
 // CheckScript lists what in a script a voice would read wrongly or aloud,
@@ -79,6 +80,9 @@ func CheckScript(text, language string) []string {
 	}
 	if mdRE.MatchString(text) {
 		w = append(w, "contains markdown: write plain spoken text")
+	}
+	if shoutRE.MatchString(text) {
+		w = append(w, `contains words in capitals like "SALE SỐC": a voice may spell them out; write them normally and use "!" for energy`)
 	}
 	if speakerRE.MatchString(text) {
 		w = append(w, `contains speaker labels like "Lan:": one clip is one voice, and labels are read aloud`)

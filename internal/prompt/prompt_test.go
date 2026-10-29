@@ -216,6 +216,9 @@ func TestCheckScript(t *testing.T) {
 		{"Lan: chào bạn\nMinh: chào", "", "speaker"},
 		{"xin chao cac ban, hom nay troi dep", "Vietnamese (vi-VN)", "tone marks"},
 		{strings.Repeat("word ", 1000), "", "long"},
+		{"SALE SỐC năm mươi phần trăm", "", "capitals"},
+		{"Big news. HUGE SALE today!", "", "capitals"},
+		{"Hôm nay GIẢM GIÁ", "", "capitals"},
 	} {
 		got := strings.Join(CheckScript(tc.text, tc.lang), " | ")
 		if !strings.Contains(got, tc.want) {
@@ -226,6 +229,7 @@ func TestCheckScript(t *testing.T) {
 		{"Xin chào, hôm nay trời đẹp quá, chúng ta cùng đi dạo nhé!", "Vietnamese"},
 		{"Hello there. It's a lovely day, isn't it?", "English"},
 		{"Guten Tag! Heute ist ein schöner Tag.", ""},
+		{"Our new API is here, says the BBC.", "English"},
 	} {
 		if w := CheckScript(ok.text, ok.lang); len(w) != 0 {
 			t.Errorf("%q: unexpected warnings %q", ok.text, w)
