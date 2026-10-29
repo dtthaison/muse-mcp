@@ -70,7 +70,7 @@ func (c *idleClock) observe(busy bool, now time.Time) time.Duration {
 	return now.Sub(c.since)
 }
 
-// ImageWait decides when an image (or video) request is finished.
+// ImageWait decides when an image (or video, or voice) request is finished.
 type ImageWait struct {
 	t           Timing
 	media       func(musepage.State) []musepage.Image // the results it waits for
@@ -90,6 +90,11 @@ func NewImageWait(base musepage.State, t Timing, start time.Time) *ImageWait {
 // NewVideoWait waits for a video the same way NewImageWait waits for an image.
 func NewVideoWait(base musepage.State, t Timing, start time.Time) *ImageWait {
 	return newMediaWait(base, t, start, func(s musepage.State) []musepage.Image { return s.Videos })
+}
+
+// NewVoiceWait waits for an audio clip the same way.
+func NewVoiceWait(base musepage.State, t Timing, start time.Time) *ImageWait {
+	return newMediaWait(base, t, start, func(s musepage.State) []musepage.Image { return s.Audios })
 }
 
 func newMediaWait(base musepage.State, t Timing, start time.Time, media func(musepage.State) []musepage.Image) *ImageWait {
@@ -154,6 +159,7 @@ type ChatWait struct {
 	baseAgents  int
 	baseImages  int
 	baseVideos  int
+	baseAudios  int
 	lastCount   int
 	lastText    string
 	stableSince time.Time
@@ -162,8 +168,8 @@ type ChatWait struct {
 
 func NewChatWait(base musepage.State, t Timing, start time.Time) *ChatWait {
 	return &ChatWait{t: t, start: start, baseAgents: len(base.AgentTexts), baseImages: len(base.Images),
-		baseVideos: len(base.Videos),
-		lastCount:  len(base.AgentTexts), lastText: lastOf(base.AgentTexts), stableSince: start}
+		baseVideos: len(base.Videos), baseAudios: len(base.Audios),
+		lastCount: len(base.AgentTexts), lastText: lastOf(base.AgentTexts), stableSince: start}
 }
 
 func (w *ChatWait) Step(s musepage.State, now time.Time) Verdict {
@@ -212,10 +218,15 @@ func (w *ChatWait) NewVideos(s musepage.State) []musepage.Image {
 	return loaded(s.Videos, w.baseVideos)
 }
 
+func (w *ChatWait) NewAudios(s musepage.State) []musepage.Image {
+	return loaded(s.Audios, w.baseAudios)
+}
+
 func loaded(images []musepage.Image, base int) []musepage.Image {
 	var out []musepage.Image
 	for i := base; i < len(images); i++ {
-		if strings.HasPrefix(images[i].Src, "blob:") {
+		// A blob: URL means loaded; an audio card is ready once it is shown.
+		if src := images[i].Src; strings.HasPrefix(src, "blob:") || strings.HasPrefix(src, "audio:") {
 			out = append(out, images[i])
 		}
 	}

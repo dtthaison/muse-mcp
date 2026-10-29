@@ -102,6 +102,26 @@ are proven against the live site and are the best reference for the page logic.
   list. Some of the consistency may come from memory, not the attachment.
 - Only tested **headful** (a visible window). Headless is untested.
 
+### 3a. Video and voice (checked live later on 2026-10-29)
+
+- **Video:** muse posts a video as a `blob:` `<video>` inside
+  `[data-testid="hatch-chat-attachment-presentation-video"]` (1920×1280, 5 s
+  in the test). The page has other `<video>` elements (480×480 decoration),
+  so only ones inside that wrapper count. AI video was blocked for the test
+  account and region; muse made a substitute itself (an animated still).
+- **Voice (text to speech):** muse posts a clip as
+  `[data-testid="hatch-chat-attachment-presentation-audio"]`, a player card
+  with "Play" and "Audio options" buttons (the options menu only has
+  "Speed") and no `<audio>` element. Clicking Play loads the clip into one
+  page-wide `<audio>` outside the card, with a `blob:` src; it is MP3
+  (`audio/mpeg`, mono 24 kHz in the test). muse-mcp clicks Play, pauses the
+  player at once, and downloads that blob. The card contains a
+  bubble-styled box with the "0:00" clock, so agent text skips anything
+  inside an attachment card.
+- The voice catalog (1,202 voices: name, gender, accent, tone, description)
+  is muse's data. muse-mcp doesn't ship it; the owner asks muse for it as a
+  CSV and imports it (`muse-mcp voices import`).
+
 ## 4. How it works
 
 ### 4.1 Shape

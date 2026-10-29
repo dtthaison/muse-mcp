@@ -268,3 +268,36 @@ func TestDecorativeVideosIgnored(t *testing.T) {
 		t.Fatalf("a video outside a chat attachment counted: %+v", s.Videos)
 	}
 }
+
+func TestVoiceClip(t *testing.T) {
+	ctx, _ := openChat(t)
+	if err := Send(ctx, "[fake:voice]"); err != nil {
+		t.Fatal(err)
+	}
+	s := until(t, ctx, "an audio clip", func(s State) bool { return !s.Busy && len(s.Audios) == 1 })
+	// The player's "0:00" sits in a bubble-styled box; it is not muse's text.
+	if len(s.AgentTexts) != 1 || s.AgentTexts[0] != "Here is your clip." {
+		t.Fatalf("agent texts %q", s.AgentTexts)
+	}
+	data, err := Download(ctx, s.Audios[0].Src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(data, []byte("ID3")) || !bytes.Contains(data, []byte("clip-0")) {
+		t.Fatalf("data %q", data)
+	}
+}
+
+func TestVoiceClipsDownloadedSeparately(t *testing.T) {
+	ctx, _ := openChat(t)
+	if err := Send(ctx, "[fake:voices]"); err != nil {
+		t.Fatal(err)
+	}
+	s := until(t, ctx, "two audio clips", func(s State) bool { return !s.Busy && len(s.Audios) == 2 })
+	for i, want := range []string{"clip-0", "clip-1"} {
+		data, err := Download(ctx, s.Audios[i].Src)
+		if err != nil || !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("clip %d: %q %v", i, data, err)
+		}
+	}
+}

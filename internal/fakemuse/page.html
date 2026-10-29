@@ -17,7 +17,7 @@
   [fake:image] [fake:textonly] [fake:textonly-then-image] [fake:approval]
   [fake:approval-oddlabel] [fake:approval-sticky] [fake:send-trap] [fake:chat]
   [fake:slow] [fake:echo-attachments] [fake:video] [fake:textonly-video]
-  [fake:decor-video]
+  [fake:decor-video] [fake:voice] [fake:voices]
 -->
 <main><div id="log"></div></main>
 <div id="composer" data-hatch-shell-hydration-state="hydrating">
@@ -122,6 +122,37 @@ function video(attachment = true) {
   });
 }
 
+// voiceClip posts an audio card like muse's: a player inside a bubble-styled
+// box, with no <audio> until Play is clicked. Play loads the clip into one
+// page-wide <audio> outside the card, as muse.ai does.
+let clips = 0;
+function voiceClip() {
+  const n = clips++;
+  const card = document.createElement('div');
+  card.setAttribute('data-testid', 'hatch-chat-attachment-presentation-audio');
+  const inner = document.createElement('div');
+  inner.className = 'hatch-agent-bubble-bg-fake';
+  const clock = document.createElement('span');
+  clock.textContent = '0:00';
+  const play = document.createElement('button');
+  play.setAttribute('aria-label', 'Play');
+  play.addEventListener('click', () => {
+    let player = document.getElementById('player');
+    if (!player) {
+      player = document.createElement('audio');
+      player.id = 'player';
+      document.body.appendChild(player);
+    }
+    const bytes = new TextEncoder().encode('ID3\x03\x00\x00\x00\x00\x00\x1bclip-' + n + ' '.repeat(32));
+    player.src = URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' }));
+  });
+  const opts = document.createElement('button');
+  opts.setAttribute('aria-label', 'Audio options');
+  inner.append(clock, play, opts);
+  card.appendChild(inner);
+  log.appendChild(card);
+}
+
 // sticky: the decided card stays in the chat with its buttons disabled.
 function approvalCard(approveLabel, onApprove, onDeny, sticky) {
   const card = document.createElement('div');
@@ -192,6 +223,15 @@ async function respond(text, names) {
     case 'textonly-video:nudge':
       bubble('Here it is.');
       await video();
+      break;
+    case 'voice':
+      bubble('Here is your clip.');
+      voiceClip();
+      break;
+    case 'voices':
+      bubble('Here are two clips.');
+      voiceClip();
+      voiceClip();
       break;
     case 'decor-video':
       // muse's page also has decorative videos outside chat attachments.

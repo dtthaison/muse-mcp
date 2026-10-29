@@ -16,6 +16,7 @@ import (
 	"github.com/dtthaison/muse-mcp/internal/muse"
 	"github.com/dtthaison/muse-mcp/internal/output"
 	"github.com/dtthaison/muse-mcp/internal/tools"
+	"github.com/dtthaison/muse-mcp/internal/voices"
 )
 
 // Service is what the commands need from muse.Service.
@@ -31,6 +32,7 @@ type Env struct {
 	Stderr      io.Writer
 	Interactive bool // stdin is a terminal, so approvals can be asked
 	Library     *library.Store
+	Voices      *voices.Catalog
 	Muse        func() (Service, func(), error)                 // starts Chrome; the func shuts it down
 	Serve       func(ctx context.Context) error                 // the MCP server on stdio
 	Claude      func(ctx context.Context, args ...string) error // runs the claude CLI
@@ -64,6 +66,10 @@ Usage:
       --ref-notes TEXT     what the extra references are for
       --aspect RATIO       e.g. 16:9
 
+  muse-mcp voice -o OUT.mp3 [--voice NAME] [--style TEXT] TEXT   (experimental)
+  muse-mcp voices [--gender G] [--accent A] [--tone T] [--limit N] [WORDS]
+  muse-mcp voices import FILE.csv   muse's voice catalog (ask muse for it as CSV)
+
   muse-mcp chat [--chat ID] [--attach FILE]... [--save DIR] MESSAGE
 
   muse-mcp refs list
@@ -72,7 +78,7 @@ Usage:
 
   muse-mcp version
 
-image, video and chat take --json to print the raw result. When muse asks to act
+image, video, voice and chat take --json to print the raw result. When muse asks to act
 on your accounts, you are asked in the terminal; without a terminal nothing is
 approved.
 `
@@ -105,6 +111,10 @@ func Run(ctx context.Context, args []string, env Env) int {
 		return r.withMuse(func(svc Service) int { return r.status(ctx, svc) })
 	case "image", "video":
 		return r.generate(ctx, cmd, rest)
+	case "voice":
+		return r.voice(ctx, rest)
+	case "voices":
+		return r.voices(rest)
 	case "chat":
 		return r.chat(ctx, rest)
 	case "refs":
@@ -249,12 +259,15 @@ func (r *runner) generate(ctx context.Context, cmd string, args []string) int {
 		return r.usageErr("%s needs -o OUTPUT", cmd)
 	}
 	a.Prompt, a.Characters, a.ReferenceImages = strings.Join(rest, " "), chars, refs
-	video := cmd == "video"
-	req, err := tools.BuildImageRequest(r.env.Library, a, video)
+	media := muse.MediaImage
+	if cmd == "video" {
+		media = muse.MediaVideo
+	}
+	req, err := tools.BuildImageRequest(r.env.Library, a, media)
 	if err != nil {
 		return r.fail(err)
 	}
-	if video {
+	if media == muse.MediaVideo {
 		fmt.Fprintln(r.env.Stderr, "Video is experimental: muse may block AI video for your account, or make a substitute.")
 	}
 	fmt.Fprintf(r.env.Stderr, "Asking muse for the %s (about a minute or more)...\n", cmd)
@@ -262,6 +275,71 @@ func (r *runner) generate(ctx context.Context, cmd string, args []string) int {
 		res, err := svc.GenerateImage(ctx, req)
 		return r.finish(ctx, svc, res, err, *asJSON)
 	})
+}
+
+func (r *runner) voice(ctx context.Context, args []string) int {
+	fs := r.newFlags("voice")
+	var a tools.VoiceArgs
+	fs.StringVar(&a.OutputPath, "o", "", "output file")
+	fs.StringVar(&a.Voice, "voice", "", "voice name")
+	fs.StringVar(&a.Style, "style", "", "how to say it")
+	asJSON := fs.Bool("json", false, "")
+	rest, err := parse(fs, args)
+	if err != nil {
+		return exitUsage
+	}
+	if a.OutputPath == "" {
+		return r.usageErr("voice needs -o OUTPUT")
+	}
+	a.Text = strings.Join(rest, " ")
+	req, err := tools.BuildVoiceRequest(a)
+	if err != nil {
+		return r.fail(err)
+	}
+	fmt.Fprintln(r.env.Stderr, "Asking muse for the voice clip (experimental, about a minute)...")
+	return r.withMuse(func(svc Service) int {
+		res, err := svc.GenerateImage(ctx, req)
+		return r.finish(ctx, svc, res, err, *asJSON)
+	})
+}
+
+func (r *runner) voices(args []string) int {
+	if len(args) > 0 && args[0] == "import" {
+		if len(args) != 2 {
+			return r.usageErr("voices import needs FILE")
+		}
+		n, err := r.env.Voices.Import(args[1])
+		if err != nil {
+			return r.fail(err)
+		}
+		fmt.Fprintf(r.env.Stdout, "Imported %d voices.\n", n)
+		return exitOK
+	}
+	fs := r.newFlags("voices")
+	var q voices.Query
+	fs.StringVar(&q.Gender, "gender", "", "female, male or neutral")
+	fs.StringVar(&q.Accent, "accent", "", "")
+	fs.StringVar(&q.Tone, "tone", "", "")
+	fs.IntVar(&q.Limit, "limit", 20, "")
+	rest, err := parse(fs, args)
+	if err != nil {
+		return exitUsage
+	}
+	q.Text = strings.Join(rest, " ")
+	vs, total, err := r.env.Voices.Search(q)
+	if err != nil {
+		return r.fail(err)
+	}
+	for _, v := range vs {
+		fmt.Fprintf(r.env.Stdout, "%s (%s, %s, %s): %s\n", v.Name, v.Gender, v.Accent, v.Tone, v.Description)
+	}
+	if total > len(vs) {
+		fmt.Fprintf(r.env.Stdout, "... %d more; narrow the search or raise --limit\n", total-len(vs))
+	}
+	if total == 0 {
+		fmt.Fprintln(r.env.Stdout, "No matching voices.")
+	}
+	return exitOK
 }
 
 func (r *runner) chat(ctx context.Context, args []string) int {
@@ -330,6 +408,9 @@ func (r *runner) print(res muse.Result, asJSON bool) {
 	}
 	for _, s := range append(append([]output.Saved{}, res.Images...), res.Videos...) {
 		fmt.Fprintf(out, "saved %s (%dx%d, %s)\n", s.Path, s.Width, s.Height, size(s.Bytes))
+	}
+	for _, s := range res.Audio {
+		fmt.Fprintf(out, "saved %s (%s)\n", s.Path, size(s.Bytes))
 	}
 	if res.Reply != "" {
 		fmt.Fprintf(out, "muse: %s\n", res.Reply)

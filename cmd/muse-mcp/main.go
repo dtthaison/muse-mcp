@@ -23,9 +23,10 @@ import (
 	"github.com/dtthaison/muse-mcp/internal/library"
 	"github.com/dtthaison/muse-mcp/internal/muse"
 	"github.com/dtthaison/muse-mcp/internal/tools"
+	"github.com/dtthaison/muse-mcp/internal/voices"
 )
 
-const version = "0.2.0"
+const version = "0.3.0"
 
 func main() {
 	os.Exit(run())
@@ -49,6 +50,7 @@ func run() int {
 	// stdout belongs to MCP; never log cookies, tokens or page bodies.
 	log := slog.New(slog.NewJSONHandler(logFile, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	lib := library.Open(paths.Library)
+	cat := voices.Open(paths.Voices)
 
 	exe, err := os.Executable()
 	if err == nil {
@@ -62,8 +64,9 @@ func run() int {
 		Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,
 		Interactive: fi != nil && fi.Mode()&os.ModeCharDevice != 0,
 		Library:     lib,
+		Voices:      cat,
 		Muse:        func() (cli.Service, func(), error) { return startMuse(paths, log) },
-		Serve:       func(ctx context.Context) error { return serve(ctx, paths, log, lib) },
+		Serve:       func(ctx context.Context) error { return serve(ctx, paths, log, lib, cat) },
 		Claude:      runClaude,
 		Exe:         exe,
 		Version:     version,
@@ -98,7 +101,7 @@ func runClaude(ctx context.Context, args ...string) error {
 	return c.Run()
 }
 
-func serve(ctx context.Context, paths config.Paths, log *slog.Logger, lib *library.Store) error {
+func serve(ctx context.Context, paths config.Paths, log *slog.Logger, lib *library.Store, cat *voices.Catalog) error {
 	log.Info("starting", "version", version)
 	var svc tools.Service
 	exe, findErr := browser.FindChrome()
@@ -120,7 +123,7 @@ func serve(ctx context.Context, paths config.Paths, log *slog.Logger, lib *libra
 	}
 
 	server := mcp.NewServer(&mcp.Implementation{Name: "muse-mcp", Version: version}, nil)
-	tools.Register(server, svc, lib)
+	tools.Register(server, svc, lib, cat)
 	err = server.Run(ctx, &mcp.StdioTransport{})
 	log.Info("stopped", "err", err)
 	if errors.Is(err, context.Canceled) {

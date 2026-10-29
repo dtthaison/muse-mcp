@@ -16,6 +16,7 @@ import (
 
 	"github.com/dtthaison/muse-mcp/internal/library"
 	"github.com/dtthaison/muse-mcp/internal/muse"
+	"github.com/dtthaison/muse-mcp/internal/voices"
 )
 
 type fakeService struct {
@@ -42,11 +43,11 @@ func (f *fakeService) Status(context.Context) (muse.StatusInfo, error) {
 	return muse.StatusInfo{Pending: []muse.PendingApproval{}}, f.err
 }
 
-func connect(t *testing.T, svc Service, lib *library.Store) *mcp.ClientSession {
+func connect(t *testing.T, svc Service, lib *library.Store, cat *voices.Catalog) *mcp.ClientSession {
 	t.Helper()
 	ctx := context.Background()
 	server := mcp.NewServer(&mcp.Implementation{Name: "muse-mcp", Version: "test"}, nil)
-	Register(server, svc, lib)
+	Register(server, svc, lib, cat)
 	ct, st := mcp.NewInMemoryTransports()
 	if _, err := server.Connect(ctx, st, nil); err != nil {
 		t.Fatal(err)
@@ -89,7 +90,7 @@ func setup(t *testing.T) (*fakeService, *library.Store, *mcp.ClientSession) {
 	t.Helper()
 	svc := &fakeService{}
 	lib := library.Open(t.TempDir())
-	return svc, lib, connect(t, svc, lib)
+	return svc, lib, connect(t, svc, lib, voices.Open(filepath.Join(t.TempDir(), "voices.csv")))
 }
 
 func TestListsTools(t *testing.T) {
@@ -106,7 +107,7 @@ func TestListsTools(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	want := "muse_chat,muse_decide_approval,muse_delete_reference,muse_generate_image,muse_generate_video,muse_list_references,muse_save_reference,muse_status"
+	want := "muse_chat,muse_decide_approval,muse_delete_reference,muse_generate_image,muse_generate_video,muse_generate_voice,muse_list_references,muse_list_voices,muse_save_reference,muse_status"
 	if strings.Join(names, ",") != want {
 		t.Fatalf("tools %v", names)
 	}
@@ -250,11 +251,51 @@ func TestGenerateVideo(t *testing.T) {
 		t.Fatalf("isError=%v text=%q", res.IsError, text)
 	}
 	got := svc.images[0]
-	if !got.Video || got.OutputPath != "v.mp4" || !strings.Contains(got.Text, "Generate a video: steam rising") {
+	if got.Media != muse.MediaVideo || got.OutputPath != "v.mp4" || !strings.Contains(got.Text, "Generate a video: steam rising") {
 		t.Fatalf("request %+v", got)
 	}
 	res, text = call(t, cs, "muse_generate_video", map[string]any{"output_path": "v.png", "prompt": "p"})
 	if !res.IsError || !strings.Contains(text, ".mp4") || len(svc.images) != 1 {
+		t.Fatalf("isError=%v text=%q", res.IsError, text)
+	}
+}
+
+func TestGenerateVoice(t *testing.T) {
+	svc, _, cs := setup(t)
+	res, text := call(t, cs, "muse_generate_voice", map[string]any{"output_path": "hi.mp3", "text": "Xin chào", "voice": "Helio", "style": "calm"})
+	if res.IsError || len(svc.images) != 1 {
+		t.Fatalf("isError=%v text=%q", res.IsError, text)
+	}
+	got := svc.images[0]
+	if got.Media != muse.MediaVoice || got.OutputPath != "hi.mp3" || !strings.Contains(got.Text, `with the voice "Helio"`) ||
+		!strings.Contains(got.Text, "Xin chào") || len(got.Attachments) != 0 {
+		t.Fatalf("request %+v", got)
+	}
+	res, text = call(t, cs, "muse_generate_voice", map[string]any{"output_path": "hi.mp4", "text": "x"})
+	if !res.IsError || !strings.Contains(text, ".mp3") || len(svc.images) != 1 {
+		t.Fatalf("isError=%v text=%q", res.IsError, text)
+	}
+}
+
+func TestListVoices(t *testing.T) {
+	dir := t.TempDir()
+	cat := voices.Open(filepath.Join(dir, "voices.csv"))
+	cs := connect(t, &fakeService{}, library.Open(dir), cat)
+	res, text := call(t, cs, "muse_list_voices", map[string]any{})
+	if !res.IsError || !strings.Contains(text, "muse-mcp voices import") {
+		t.Fatalf("no catalog: isError=%v text=%q", res.IsError, text)
+	}
+	src := filepath.Join(dir, "v.csv")
+	os.WriteFile(src, []byte("name,gender,accent,tone,description\nAria,F,American,Warm,x\nHelio,M,American,Smooth,y\n"), 0o600)
+	if _, err := cat.Import(src); err != nil {
+		t.Fatal(err)
+	}
+	res, text = call(t, cs, "muse_list_voices", map[string]any{"gender": "male"})
+	var out struct {
+		Voices  []voices.Voice `json:"voices"`
+		Matched int            `json:"matched"`
+	}
+	if res.IsError || json.Unmarshal([]byte(text), &out) != nil || out.Matched != 1 || out.Voices[0].Name != "Helio" {
 		t.Fatalf("isError=%v text=%q", res.IsError, text)
 	}
 }

@@ -159,3 +159,25 @@ func TestVideoWording(t *testing.T) {
 		t.Fatal(NudgeVideo)
 	}
 }
+
+func TestVoice(t *testing.T) {
+	b, err := Voice(VoiceInput{Text: "Xin chào!\nHello.", Voice: "Helio", Style: "slow and warm."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contains(t, b.Text, `with the voice "Helio"`)
+	contains(t, b.Text, "Style: slow and warm.")
+	contains(t, b.Text, "\"\"\"\nXin chào!\nHello.\n\"\"\"")
+	contains(t, b.Text, "Attach the final audio clip here in the chat as a single audio file.")
+	if len(b.Attachments) != 0 {
+		t.Fatalf("attachments %v", b.Attachments)
+	}
+	b, _ = Voice(VoiceInput{Text: "hi"})
+	contains(t, b.Text, "Pick a voice that suits the text.")
+	if _, err := Voice(VoiceInput{Text: "  "}); err == nil {
+		t.Fatal("want error for empty text")
+	}
+	if !strings.Contains(NudgeVoice, "audio") {
+		t.Fatal(NudgeVoice)
+	}
+}

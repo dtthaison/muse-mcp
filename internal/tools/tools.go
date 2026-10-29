@@ -14,6 +14,7 @@ import (
 	"github.com/dtthaison/muse-mcp/internal/muse"
 	"github.com/dtthaison/muse-mcp/internal/output"
 	"github.com/dtthaison/muse-mcp/internal/prompt"
+	"github.com/dtthaison/muse-mcp/internal/voices"
 )
 
 // Service is the part of muse.Service the tools use.
@@ -49,6 +50,27 @@ type videoIn struct {
 	ReferenceImages []string `json:"reference_images,omitempty" jsonschema:"extra image files to attach as references (e.g. a first frame)"`
 	ReferenceNotes  string   `json:"reference_notes,omitempty" jsonschema:"what the extra reference images are for"`
 	AspectRatio     string   `json:"aspect_ratio,omitempty" jsonschema:"e.g. 16:9, 1:1, 9:16"`
+}
+
+// VoiceArgs are the inputs of muse_generate_voice (and the CLI's voice command).
+type VoiceArgs struct {
+	OutputPath string `json:"output_path" jsonschema:"where to save the audio: a .mp3 (or .wav, .ogg) path; relative paths resolve against the project directory"`
+	Text       string `json:"text" jsonschema:"what the voice says, word for word"`
+	Voice      string `json:"voice,omitempty" jsonschema:"a voice name from muse's catalog (see muse_list_voices), e.g. Helio or Aria; empty lets muse pick"`
+	Style      string `json:"style,omitempty" jsonschema:"how to say it, e.g. slow and calm, cheerful"`
+}
+
+type listVoicesIn struct {
+	Query  string `json:"query,omitempty" jsonschema:"words that must all appear in the name, accent, tone or description, e.g. deep calm"`
+	Gender string `json:"gender,omitempty" jsonschema:"female, male or neutral"`
+	Accent string `json:"accent,omitempty" jsonschema:"e.g. British, Vietnamese"`
+	Tone   string `json:"tone,omitempty" jsonschema:"e.g. warm, bright, gravelly"`
+	Limit  int    `json:"limit,omitempty" jsonschema:"at most this many voices (default 20, max 200)"`
+}
+
+type voicesOut struct {
+	Voices  []voices.Voice `json:"voices"`
+	Matched int            `json:"matched"` // before the limit
 }
 
 type chatIn struct {
@@ -90,6 +112,8 @@ const (
 	descStatus   = `Check whether muse-mcp's Chrome is running, whether you are logged in to muse.ai, and list approvals waiting for the owner's decision.`
 	descGenerate = `Generate an image with muse.ai and save it to output_path (.png, .jpg or .webp). For recurring characters or scenes, pass their saved names in characters/scene so the same reference images are attached every time. To keep everything the same and change one thing, use change (e.g. "the fox is now asleep") instead of re-describing the scene. Takes about a minute.`
 	descVideo    = `EXPERIMENTAL, under testing. Generate a short video with muse.ai and save it to output_path (.mp4 or .webm). Same inputs as muse_generate_image. muse blocks AI video for some accounts and regions; it may then make a substitute (for example an animated still), so read the reply. Can take several minutes.`
+	descVoice    = `EXPERIMENTAL, under testing. Make a text-to-speech voice clip with muse.ai and save it to output_path (.mp3). Pass the exact text; optionally a voice name from muse_list_voices (e.g. Helio, Aria) and a style. Takes about a minute.`
+	descVoices   = `Search muse's text-to-speech voice catalog (names to pass to muse_generate_voice) by words, gender, accent or tone. The owner imports the catalog once with "muse-mcp voices import FILE".`
 	descChat     = `Send a message to the owner's muse.ai agent and return its reply. Pass chat_id from an earlier result to continue that conversation. muse may ask to act on the owner's accounts; that comes back as status "needs_approval".`
 	descDecide   = `Approve or deny an action muse asked permission for. This is the owner's decision: only call it after the owner has told you which to choose for this specific approval.`
 	descSaveRef  = `Save a named character or scene (images + a fixed description) for consistent images later. Use kind "character" for who (face, markings, outfit) and "scene" for where (layout, lighting, style).`
@@ -98,7 +122,7 @@ const (
 )
 
 // Register adds the muse tools to s.
-func Register(s *mcp.Server, svc Service, lib *library.Store) {
+func Register(s *mcp.Server, svc Service, lib *library.Store, cat *voices.Catalog) {
 	mcp.AddTool(s, &mcp.Tool{Name: "muse_status", Description: descStatus},
 		func(ctx context.Context, _ *mcp.CallToolRequest, _ statusIn) (*mcp.CallToolResult, muse.StatusInfo, error) {
 			st, err := svc.Status(ctx)
@@ -107,7 +131,7 @@ func Register(s *mcp.Server, svc Service, lib *library.Store) {
 
 	mcp.AddTool(s, &mcp.Tool{Name: "muse_generate_image", Description: descGenerate},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in ImageArgs) (*mcp.CallToolResult, muse.Result, error) {
-			req, err := BuildImageRequest(lib, in, false)
+			req, err := BuildImageRequest(lib, in, muse.MediaImage)
 			if err != nil {
 				return nil, muse.Result{}, err
 			}
@@ -117,12 +141,31 @@ func Register(s *mcp.Server, svc Service, lib *library.Store) {
 
 	mcp.AddTool(s, &mcp.Tool{Name: "muse_generate_video", Description: descVideo},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in videoIn) (*mcp.CallToolResult, muse.Result, error) {
-			req, err := BuildImageRequest(lib, ImageArgs(in), true)
+			req, err := BuildImageRequest(lib, ImageArgs(in), muse.MediaVideo)
 			if err != nil {
 				return nil, muse.Result{}, err
 			}
 			res, err := svc.GenerateImage(ctx, req)
 			return nil, res, err
+		})
+
+	mcp.AddTool(s, &mcp.Tool{Name: "muse_generate_voice", Description: descVoice},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in VoiceArgs) (*mcp.CallToolResult, muse.Result, error) {
+			req, err := BuildVoiceRequest(in)
+			if err != nil {
+				return nil, muse.Result{}, err
+			}
+			res, err := svc.GenerateImage(ctx, req)
+			return nil, res, err
+		})
+
+	mcp.AddTool(s, &mcp.Tool{Name: "muse_list_voices", Description: descVoices},
+		func(_ context.Context, _ *mcp.CallToolRequest, in listVoicesIn) (*mcp.CallToolResult, voicesOut, error) {
+			vs, n, err := cat.Search(voices.Query{Text: in.Query, Gender: in.Gender, Accent: in.Accent, Tone: in.Tone, Limit: in.Limit})
+			if vs == nil {
+				vs = []voices.Voice{}
+			}
+			return nil, voicesOut{Voices: vs, Matched: n}, err
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "muse_chat", Description: descChat},
@@ -171,8 +214,8 @@ func Register(s *mcp.Server, svc Service, lib *library.Store) {
 
 // BuildImageRequest checks everything that can be checked before Chrome is
 // touched, so a mistake costs no muse quota.
-func BuildImageRequest(lib *library.Store, in ImageArgs, video bool) (muse.ImageRequest, error) {
-	check := output.CheckPath
+func BuildImageRequest(lib *library.Store, in ImageArgs, media muse.Media) (muse.ImageRequest, error) {
+	check, video := output.CheckPath, media == muse.MediaVideo
 	if video {
 		check = output.CheckVideoPath
 	}
@@ -199,7 +242,19 @@ func BuildImageRequest(lib *library.Store, in ImageArgs, video bool) (muse.Image
 	if err != nil {
 		return muse.ImageRequest{}, err
 	}
-	return muse.ImageRequest{Text: built.Text, Attachments: built.Attachments, OutputPath: in.OutputPath, Video: video}, nil
+	return muse.ImageRequest{Text: built.Text, Attachments: built.Attachments, OutputPath: in.OutputPath, Media: media}, nil
+}
+
+// BuildVoiceRequest checks a voice request before Chrome is touched.
+func BuildVoiceRequest(in VoiceArgs) (muse.ImageRequest, error) {
+	if err := output.CheckAudioPath(in.OutputPath); err != nil {
+		return muse.ImageRequest{}, err
+	}
+	built, err := prompt.Voice(prompt.VoiceInput{Text: in.Text, Voice: in.Voice, Style: in.Style})
+	if err != nil {
+		return muse.ImageRequest{}, err
+	}
+	return muse.ImageRequest{Text: built.Text, OutputPath: in.OutputPath, Media: muse.MediaVoice}, nil
 }
 
 // CheckFiles requires every chat attachment to be an existing regular file
