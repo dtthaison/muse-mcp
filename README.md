@@ -184,15 +184,24 @@ the command line) sends it anyway.
 
 If you publish a clip, say that the voice is AI-generated.
 
-muse has a catalog of about 1,200 named voices. muse-mcp doesn't ship it.
-Ask muse once for "your voice catalog as a CSV file with name, gender, accent,
-tone and description", save the file it gives you, and import it:
+muse has a catalog of about 1,200 named voices (35 accents). muse-mcp comes
+with it built in, as muse listed it on 2026-10-29
+([internal/voices/catalog.csv](internal/voices/catalog.csv)), so you can
+search it right away:
+
+```sh
+muse-mcp voices --accent vietnamese
+muse-mcp voices --gender female warm
+muse-mcp voices --all        # every voice
+muse-mcp voices accents      # how many voices each accent has
+```
+
+If muse adds voices, ask it for "your voice catalog as a CSV file with name,
+gender, accent, tone and description" and import the file; it replaces the
+built-in list (delete `~/.muse-mcp/voices.csv` to go back):
 
 ```sh
 muse-mcp voices import ~/Downloads/voice-list.csv
-muse-mcp voices --accent vietnamese
-muse-mcp voices --all        # every voice
-muse-mcp voices accents      # how many voices each accent has
 ```
 
 An accent is how a voice sounds, not a language it speaks well: muse warned
@@ -235,7 +244,7 @@ approved). Open the chat in muse.ai to decide them there.
 
 Everything lives in `~/.muse-mcp/` (override with `MUSE_MCP_HOME`):
 `chrome-profile/` (your muse login), `library/` (saved references),
-`voices.csv` (the imported voice catalog), `chats.json` (the chats muse-mcp
+`voices.csv` (a voice catalog you imported, if any), `chats.json` (the chats muse-mcp
 started), `muse-mcp.log`.
 
 ## Development

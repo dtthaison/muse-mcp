@@ -396,8 +396,8 @@ func TestVoiceDefaultsToCurrentFolder(t *testing.T) {
 
 func TestVoices(t *testing.T) {
 	h := newHarness(t)
-	if code := h.run("", true, "voices"); code != 1 || !strings.Contains(h.errOut.String(), "voices import") {
-		t.Fatalf("no catalog: code=%d stderr=%q", code, h.errOut.String())
+	if code := h.run("", true, "voices", "--accent", "vietnamese"); code != 0 || !strings.Contains(h.out.String(), "Vietnamese") {
+		t.Fatalf("built-in catalog: code=%d out=%q stderr=%q", code, h.out.String(), h.errOut.String())
 	}
 	src := filepath.Join(t.TempDir(), "voice-list.csv")
 	os.WriteFile(src, []byte("name,gender,accent,tone,description\nAria,F,American,Warm,Friendly\nLan,F,Vietnamese,Bright,Young\nHelio,M,American,Smooth,Calm\n"), 0o600)

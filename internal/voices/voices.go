@@ -1,9 +1,12 @@
-// Package voices searches muse's text-to-speech voice catalog. muse-mcp does
-// not ship the catalog: the owner asks muse for it as a CSV (name, gender,
-// accent, tone, description) and imports it.
+// Package voices searches muse's text-to-speech voice catalog. muse-mcp ships
+// the catalog muse gave on 2026-10-29 (catalog.csv: name, gender, accent,
+// tone, description). An owner can import a newer one, which then replaces
+// it.
 package voices
 
 import (
+	"bytes"
+	_ "embed"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -14,8 +17,8 @@ import (
 	"strings"
 )
 
-// ErrNoCatalog means no catalog has been imported yet.
-var ErrNoCatalog = errors.New(`no voice catalog yet: ask muse for its voice catalog as a CSV file (name, gender, accent, tone, description), then run "muse-mcp voices import FILE"`)
+//go:embed catalog.csv
+var builtIn []byte
 
 // Voice is one catalog entry. Gender is F, M or N.
 type Voice struct {
@@ -36,7 +39,8 @@ type Query struct {
 	All    bool   // no limit
 }
 
-// Catalog is the imported catalog file.
+// Catalog is the imported catalog file, or the built-in one when there is
+// none.
 type Catalog struct{ path string }
 
 func Open(path string) *Catalog { return &Catalog{path: path} }
@@ -77,6 +81,13 @@ func (c *Catalog) Import(src string) (int, error) {
 	return len(vs), os.Rename(tmp.Name(), c.path)
 }
 
+// Imported reports whether the owner imported a catalog (otherwise the
+// built-in one is used).
+func (c *Catalog) Imported() bool {
+	_, err := os.Stat(c.path)
+	return err == nil
+}
+
 // Search returns the voices matching q, in catalog order, and how many matched
 // before the limit.
 func (c *Catalog) Search(q Query) ([]Voice, int, error) {
@@ -84,15 +95,16 @@ func (c *Catalog) Search(q Query) ([]Voice, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
+	var r io.Reader = bytes.NewReader(builtIn)
 	f, err := os.Open(c.path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, 0, ErrNoCatalog
-	}
-	if err != nil {
+	switch {
+	case err == nil:
+		defer f.Close()
+		r = f
+	case !errors.Is(err, os.ErrNotExist):
 		return nil, 0, err
 	}
-	defer f.Close()
-	vs, err := parse(f)
+	vs, err := parse(r)
 	if err != nil {
 		return nil, 0, err
 	}
