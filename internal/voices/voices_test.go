@@ -1,7 +1,6 @@
 package voices
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,10 +72,32 @@ func TestBadGender(t *testing.T) {
 	}
 }
 
-func TestNoCatalog(t *testing.T) {
-	_, _, err := Open(filepath.Join(t.TempDir(), "voices.csv")).Search(Query{})
-	if !errors.Is(err, ErrNoCatalog) {
-		t.Fatalf("err = %v", err)
+// Without an import, the catalog built into muse-mcp is used.
+func TestBuiltInCatalog(t *testing.T) {
+	c := Open(filepath.Join(t.TempDir(), "voices.csv"))
+	all, total, err := c.Search(Query{All: true})
+	if err != nil || total < 1000 || len(all) != total {
+		t.Fatalf("built-in: %d voices, %v", total, err)
+	}
+	if vs, _, _ := c.Search(Query{Text: "aria"}); len(vs) == 0 || vs[0].Name != "Aria" {
+		t.Fatalf("no Aria: %v", names(vs))
+	}
+	if vs, _, _ := c.Search(Query{Accent: "vietnamese"}); len(vs) == 0 {
+		t.Fatal("no Vietnamese-accent voices")
+	}
+	if c.Imported() {
+		t.Fatal("Imported() with no import")
+	}
+}
+
+// An imported catalog replaces the built-in one.
+func TestImportedCatalogWins(t *testing.T) {
+	c := catalog(t)
+	if _, total, err := c.Search(Query{All: true}); err != nil || total != 4 {
+		t.Fatalf("imported: %d voices, %v", total, err)
+	}
+	if !c.Imported() {
+		t.Fatal("Imported() after an import")
 	}
 }
 

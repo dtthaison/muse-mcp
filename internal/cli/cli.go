@@ -84,7 +84,7 @@ Usage:
                                    (experimental; saves DIR/<chat id>-<chat title>.mp3)
   muse-mcp voices [--gender G] [--accent A] [--tone T] [--limit N | --all] [WORDS]
   muse-mcp voices accents          how many voices each accent has
-  muse-mcp voices import FILE.csv   muse's voice catalog (ask muse for it as CSV)
+  muse-mcp voices import FILE.csv   a newer voice catalog from muse (built in otherwise)
 
   muse-mcp chat [--chat ID] [--attach FILE]... [--save DIR] MESSAGE
 

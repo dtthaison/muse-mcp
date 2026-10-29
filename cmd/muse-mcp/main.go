@@ -28,7 +28,7 @@ import (
 	"github.com/dtthaison/muse-mcp/internal/voices"
 )
 
-const version = "1.0.0"
+const version = "1.1.0"
 
 func main() {
 	os.Exit(run())

@@ -112,8 +112,9 @@ Video and text-to-speech were added later as experimental tools (§3a).
   bubble-styled box with the "0:00" clock, so agent text skips anything
   inside an attachment card.
 - The voice catalog (1,202 voices: name, gender, accent, tone, description)
-  is muse's data. muse-mcp doesn't ship it; the owner asks muse for it as a
-  CSV and imports it (`muse-mcp voices import`).
+  is built in (`internal/voices/catalog.csv`, embedded), as muse listed it
+  on 2026-10-29. An owner who imports a newer CSV (`muse-mcp voices
+  import`) gets that instead.
 - **What muse's voice tool takes:** a voice, a language code, a speed
   (1 to 200, default 100) and the script, plus a second voice for dialogue
   scripts (muse-mcp doesn't use that). No emotion, style, instruction,

@@ -356,8 +356,8 @@ func TestListVoices(t *testing.T) {
 	cat := voices.Open(filepath.Join(dir, "voices.csv"))
 	cs := connect(t, &fakeService{}, library.Open(dir), cat)
 	res, text := call(t, cs, "muse_list_voices", map[string]any{})
-	if !res.IsError || !strings.Contains(text, "muse-mcp voices import") {
-		t.Fatalf("no catalog: isError=%v text=%q", res.IsError, text)
+	if res.IsError || !strings.Contains(text, `"name":"Aria"`) {
+		t.Fatalf("built-in catalog: isError=%v text=%q", res.IsError, text)
 	}
 	src := filepath.Join(dir, "v.csv")
 	os.WriteFile(src, []byte("name,gender,accent,tone,description\nAria,F,American,Warm,x\nHelio,M,American,Smooth,y\n"), 0o600)
