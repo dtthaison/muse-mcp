@@ -1,5 +1,6 @@
 // Command muse-mcp is an MCP server (stdio) that lets Claude Code generate
-// images and chat through the owner's muse.ai account.
+// images and chat through the owner's muse.ai account. With a command
+// (install, login, image, ...) it is a CLI; see internal/cli.
 package main
 
 import (
@@ -8,45 +9,97 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/dtthaison/muse-mcp/internal/browser"
 	"github.com/dtthaison/muse-mcp/internal/chats"
+	"github.com/dtthaison/muse-mcp/internal/cli"
 	"github.com/dtthaison/muse-mcp/internal/config"
 	"github.com/dtthaison/muse-mcp/internal/library"
 	"github.com/dtthaison/muse-mcp/internal/muse"
 	"github.com/dtthaison/muse-mcp/internal/tools"
 )
 
-const version = "0.1.0"
+const version = "0.2.0"
 
 func main() {
-	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "muse-mcp:", err)
-		os.Exit(1)
-	}
+	os.Exit(run())
 }
 
-func run() error {
+func run() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	paths, err := config.Load()
 	if err != nil {
-		return err
+		fmt.Fprintln(os.Stderr, "muse-mcp:", err)
+		return 1
 	}
 	logFile, err := os.OpenFile(paths.Log, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
-		return err
+		fmt.Fprintln(os.Stderr, "muse-mcp:", err)
+		return 1
 	}
 	defer logFile.Close()
 	// stdout belongs to MCP; never log cookies, tokens or page bodies.
 	log := slog.New(slog.NewJSONHandler(logFile, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	log.Info("starting", "version", version)
+	lib := library.Open(paths.Library)
 
+	exe, err := os.Executable()
+	if err == nil {
+		exe, err = filepath.EvalSymlinks(exe)
+	}
+	if err != nil {
+		exe = "muse-mcp"
+	}
+	fi, _ := os.Stdin.Stat()
+	return cli.Run(ctx, os.Args[1:], cli.Env{
+		Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,
+		Interactive: fi != nil && fi.Mode()&os.ModeCharDevice != 0,
+		Library:     lib,
+		Muse:        func() (cli.Service, func(), error) { return startMuse(paths, log) },
+		Serve:       func(ctx context.Context) error { return serve(ctx, paths, log, lib) },
+		Claude:      runClaude,
+		Exe:         exe,
+		Version:     version,
+	})
+}
+
+// startMuse starts Chrome and the muse service for one CLI command.
+func startMuse(paths config.Paths, log *slog.Logger) (cli.Service, func(), error) {
+	exe, err := browser.FindChrome()
+	if err != nil {
+		return nil, nil, err
+	}
+	br, err := browser.New(browser.Options{ExecPath: exe, ProfileDir: paths.Profile, LockPath: paths.Lock})
+	if errors.Is(err, browser.ErrLocked) {
+		return nil, nil, errors.New("another muse-mcp (probably a Claude Code session) is using your muse login; use the muse tools there, or quit it first")
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	s := muse.New(muse.Options{BaseURL: "https://muse.ai", Browser: br, Chats: chats.Load(paths.Chats),
+		Timing: muse.DefaultTiming(), Log: log})
+	return s, func() { s.Close(); br.Close() }, nil
+}
+
+// runClaude runs the claude CLI, for install and uninstall.
+func runClaude(ctx context.Context, args ...string) error {
+	if _, err := exec.LookPath("claude"); err != nil {
+		return fmt.Errorf("the claude command isn't on PATH; run it yourself: claude %v", args)
+	}
+	c := exec.CommandContext(ctx, "claude", args...)
+	c.Stdout, c.Stderr = os.Stdout, os.Stderr
+	return c.Run()
+}
+
+func serve(ctx context.Context, paths config.Paths, log *slog.Logger, lib *library.Store) error {
+	log.Info("starting", "version", version)
 	var svc tools.Service
 	exe, findErr := browser.FindChrome()
 	br, err := browser.New(browser.Options{ExecPath: exe, ProfileDir: paths.Profile, LockPath: paths.Lock})
@@ -67,7 +120,7 @@ func run() error {
 	}
 
 	server := mcp.NewServer(&mcp.Implementation{Name: "muse-mcp", Version: version}, nil)
-	tools.Register(server, svc, library.Open(paths.Library))
+	tools.Register(server, svc, lib)
 	err = server.Run(ctx, &mcp.StdioTransport{})
 	log.Info("stopped", "err", err)
 	if errors.Is(err, context.Canceled) {

@@ -233,6 +233,35 @@ func (s *Service) Decide(ctx context.Context, chatID, approvalID string, approve
 	return s.runChat(ctx, chatID, p.tab, p.chat, p.cw)
 }
 
+// Login opens muse.ai. If it shows its login page, Chrome becomes visible and
+// Login waits until the owner has logged in and the window is hidden again.
+func (s *Service) Login(ctx context.Context) error {
+	s.call.Lock()
+	t, err := s.newTab(ctx)
+	if err == nil {
+		_, err = s.open(ctx, t, musepage.NewChatURL(s.o.BaseURL))
+		t.cancel()
+	}
+	s.call.Unlock()
+	if !errors.Is(err, ErrLoggedOut) {
+		return err
+	}
+	for {
+		s.mu.Lock()
+		in, watching := s.loggedIn, s.watching
+		s.mu.Unlock()
+		if in {
+			return nil
+		}
+		if !watching {
+			return errors.New("the login window closed before the login finished")
+		}
+		if err := sleep(ctx, time.Second); err != nil {
+			return err
+		}
+	}
+}
+
 func (s *Service) Status(ctx context.Context) (StatusInfo, error) {
 	s.sync()
 	s.mu.Lock()

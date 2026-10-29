@@ -460,3 +460,39 @@ func TestChatSavesVideos(t *testing.T) {
 		t.Fatalf("result %+v", res)
 	}
 }
+
+func TestLoginWhenLoggedIn(t *testing.T) {
+	f := newFixture(t, fastTiming())
+	if err := f.svc.Login(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := f.svc.Status(context.Background()); !st.LoggedIn || st.Visible {
+		t.Fatalf("status %+v", st)
+	}
+}
+
+func TestLoginWaitsForOwner(t *testing.T) {
+	needVisible(t)
+	f := newFixture(t, fastTiming())
+	f.srv.SetLoggedOut(true)
+	errc := make(chan error, 1)
+	go func() { errc <- f.svc.Login(context.Background()) }()
+	time.Sleep(3 * time.Second)
+	select {
+	case err := <-errc:
+		t.Fatalf("returned before login: %v", err)
+	default:
+	}
+	f.srv.SetLoggedOut(false) // the owner logs in
+	select {
+	case err := <-errc:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("Login did not notice the login")
+	}
+	if st, _ := f.svc.Status(context.Background()); !st.LoggedIn || st.Visible {
+		t.Fatalf("status %+v", st)
+	}
+}
