@@ -51,8 +51,8 @@ result with the real item before posting: muse regenerates the photo, so
 Image models paint letters; they don't spell. If wording must be exact (shop
 name, price, date, Vietnamese with tone marks), generate with
 "no text in the image" and leave empty space, then tell the owner to add the
-text in Canva. Otherwise: at most 3 to 5 words, in quotes, large, simple
-font, plain area, "no other text".
+text in Canva or another design tool. Otherwise: at most 3 to 5 words, in
+quotes, large, simple font, plain area, "no other text".
 
 ## References and consistency
 

@@ -14,8 +14,8 @@ exact first frame, and there's no first-and-last-frame mode.
   and offer: a still image (`muse_generate_image`), or a prompt to paste into
   Kling, Hailuo or CapCut, written with the same rules below.
 - Each clip is a muse chat and quota. A video longer than about 10 seconds
-  is several clips joined in an editor (CapCut): plan the clips, show the
-  owner the list, and ask before making more than one.
+  is several clips joined in an editor (CapCut or any other): plan the
+  clips, show the owner the list, and ask before making more than one.
 
 ## The prompt: one shot, one action, one camera move
 
@@ -62,8 +62,8 @@ low-angle, high-angle, top-down, POV.
 ## Text and sound
 
 - Nothing a viewer must read goes in the clip: captions, prices, logos and
-  any Vietnamese text are added in CapCut afterwards. For 9:16, keep them
-  between about 15% and 75% of the height, away from the right edge.
+  any Vietnamese text are added in the editor afterwards. For 9:16, keep
+  them between about 15% and 75% of the height, away from the right edge.
 - muse can't control sound. Add music or a voiceover in the editor; a
   voiceover can come from `muse_generate_speech`.
 

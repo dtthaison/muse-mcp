@@ -8,18 +8,19 @@ comes from the voice you pick and how the script is written.
 ## The call
 
 1. **`voice`**: the only way to change how the voice sounds (gender, depth,
-   accent). muse's catalog is built in (1,202 voices, 35 accents). Each
-   voice has one tone word (Warm, Calm, Bright, Confident, Delighted...)
+   accent). muse's catalog is built in (about 1,200 voices, 35 accents).
+   Each voice has one tone word (Warm, Calm, Bright, Confident, Delighted...)
    and a description with its pitch ("Deep", "High"). Search it with
    `muse_list_voices` by `gender`, `accent`, `tone` (matches the tone word)
    or words, which match name, accent, tone and description (command line:
    `muse-mcp voices --accent vietnamese --gender female`; `muse-mcp voices
-   accents` lists the accents). Most accents have few voices (Vietnamese 7,
-   German 13): if the tone finds nothing, list gender and accent and pick
-   the closest tone ("warm" → Delighted, Gentle or Friendly). Pick one name
-   and tell the owner why, naming the runner-up if two fit equally. An
-   accent is how a voice sounds, not proof it speaks that language well.
-   Leave `voice` out only if the owner doesn't mind; muse then picks one.
+   accents` lists the accents). Most accents have few voices (Vietnamese
+   has 7, none of them Warm): if the tone finds nothing for that accent,
+   list gender and accent and pick the closest tone (for "warm": Delighted,
+   Gentle or Friendly). Pick one name and tell the owner why, naming the
+   runner-up if two fit equally. An accent is how a voice sounds, not proof
+   it speaks that language well. Leave `voice` out only if the owner
+   doesn't mind; muse then picks one.
 2. **`language`**: with locale: `Vietnamese (vi-VN)`, `English (en-US)`,
    `German (de-DE)`. One language per clip.
 3. **`speed`**: from the feeling (table below).
@@ -91,9 +92,11 @@ chín mươi chín nghìn". In English write contractions: it's, don't, we're.
 ## Around the call
 
 - Show the owner the exact spoken script, the voice and the speed.
+- muse-mcp refuses a script with digits, symbols, links, emoji, tags,
+  phrases in capitals or speaker labels before muse is asked, so no quota
+  is spent: fix the script. Set `ignore_script_warnings` only when the
+  owner wants it read as written.
 - A script longer than about 30 seconds (75 words): make the hardest 1 or 2
   sentences first and let the owner listen before the rest.
 - Say "asking muse" until the result comes back. Then report the saved path
   and anything muse said about quality.
-- If the clip will be published (TikTok, Spotify, YouTube, ads), remind the
-  owner to label it as an AI-generated voice.
