@@ -21,7 +21,9 @@ for it. Include what you found, how to reproduce it and the muse-mcp version
   terminal); without a terminal the CLI never approves.
 - It only sends into, continues or deletes muse chats it started itself
   (`~/.muse-mcp/chats.json`). It never touches your own chats.
-- Chrome's remote debugging listens on 127.0.0.1 only.
+- muse-mcp controls Chrome over a pipe, not a network port: its Chrome opens
+  no remote-debugging port, so no other program can attach to your logged-in
+  session through one.
 
 A way around any of these is a security bug.
 

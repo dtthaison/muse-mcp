@@ -141,8 +141,8 @@ Video and text-to-speech were added later as experimental tools (§3a).
   prompt and ordered images only. Clips are about 10 seconds with no length
   setting; no ratio, resolution, audio, negative-prompt, seed or style
   setting; images are references, not an exact first frame, and there is no
-  first-and-last-frame mode; up to 6 videos per message. Blocked for the
-  owner's account and region (403, last checked by muse on 2026-10-21).
+  first-and-last-frame mode; up to 6 videos per message. Blocked with a 403
+  for some accounts and regions.
 - **Chat replies can pause behind a short message.** muse may post
   "Checking the exact tool parameters…" and keep working, Stop button
   showing, with that text unchanged for half a minute or more. Logged live:
@@ -162,8 +162,7 @@ Video and text-to-speech were added later as experimental tools (§3a).
   chat as deleted once muse leaves it or the open panel stops listing it.
   Checked live with `muse-mcp chats delete` on 2026-10-29: the chat was
   deleted, and opening it afterwards shows "Something went wrong". muse-mcp deletes only chats in chats.json, and only when asked.
-- A chat muse can't open (24 test chats from 2026-10-29, probably deleted in
-  muse afterwards) shows "Something went wrong" with "Try again" and
+- A chat muse can't open (for example one deleted in muse) shows "Something went wrong" with "Try again" and
   `chat-empty-loading`, and no chat switcher. The composer is ready seconds
   before a chat's messages and switcher are, so the delete waits for the
   switcher first. muse kept the ID it first put in the URL
@@ -219,10 +218,13 @@ results.
 
 ### 4.3a Chrome process
 
-- macOS first (that's the owner's machine). Default binary:
-  `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`; override with
-  the `MUSE_CHROME` environment variable. Other OSes aren't required.
-- Remote debugging on 127.0.0.1 only, on a free port picked at launch.
+- macOS and Linux; not Windows (the profile lock uses `flock`). Default
+  binary: `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`, else
+  `google-chrome` or `chromium` on `PATH`; override with the `MUSE_CHROME`
+  environment variable.
+- No remote-debugging port: chromedp talks to Chrome over a pipe
+  (`--remote-debugging-pipe`), and `TestNoDebuggingPort` checks that Chrome
+  writes no `DevToolsActivePort`.
 - A lock file in `~/.muse-mcp/` keeps a second `muse-mcp` (for example a second
   Claude Code session) from using the same profile. The server takes it on its
   first muse call, not at startup: every Claude Code session (including

@@ -110,6 +110,18 @@ func TestLazyStartAndTab(t *testing.T) {
 	}
 }
 
+// Chrome writes DevToolsActivePort to the profile when it opens a debugging
+// port; muse-mcp talks to it over a pipe, so no port may be open.
+func TestNoDebuggingPort(t *testing.T) {
+	b := newBrowser(t, "")
+	srv := fakemuse.New()
+	defer srv.Close()
+	openFake(t, b, srv)
+	if _, err := os.Stat(filepath.Join(b.opts.ProfileDir, "DevToolsActivePort")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Chrome opened a debugging port (DevToolsActivePort: %v)", err)
+	}
+}
+
 func TestRelaunchAfterChromeDies(t *testing.T) {
 	b := newBrowser(t, "")
 	srv := fakemuse.New()
