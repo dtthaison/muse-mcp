@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -32,6 +33,7 @@ type Query struct {
 	Accent string // substring, e.g. "british"
 	Tone   string // substring, e.g. "warm"
 	Limit  int    // default 20, at most 200
+	All    bool   // no limit
 }
 
 // Catalog is the imported catalog file.
@@ -112,11 +114,47 @@ func (c *Catalog) Search(q Query) ([]Voice, int, error) {
 			continue
 		}
 		total++
-		if len(out) < limit {
+		if q.All || len(out) < limit {
 			out = append(out, v)
 		}
 	}
 	return out, total, nil
+}
+
+// AccentCount is how many voices have one accent.
+type AccentCount struct {
+	Accent                       string
+	Total, Female, Male, Neutral int
+}
+
+// Accents counts the voices per accent, most voices first.
+func (c *Catalog) Accents() ([]AccentCount, error) {
+	vs, _, err := c.Search(Query{All: true})
+	if err != nil {
+		return nil, err
+	}
+	idx := map[string]int{}
+	var out []AccentCount
+	for _, v := range vs {
+		i, ok := idx[v.Accent]
+		if !ok {
+			i = len(out)
+			idx[v.Accent] = i
+			out = append(out, AccentCount{Accent: v.Accent})
+		}
+		a := &out[i]
+		a.Total++
+		switch v.Gender {
+		case "F":
+			a.Female++
+		case "M":
+			a.Male++
+		case "N":
+			a.Neutral++
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Total > out[j].Total })
+	return out, nil
 }
 
 func parse(r io.Reader) ([]Voice, error) {

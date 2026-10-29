@@ -114,7 +114,12 @@ tone and description", save the file it gives you, and import it:
 ```sh
 muse-mcp voices import ~/Downloads/voice-list.csv
 muse-mcp voices --accent vietnamese
+muse-mcp voices --all        # every voice
+muse-mcp voices accents      # how many voices each accent has
 ```
+
+An accent is how a voice sounds, not a language it speaks well: muse warned
+that a Vietnamese-accent voice "may sound a bit imperfect" reading Vietnamese.
 
 Then Claude can search it with `muse_list_voices` and pick a voice by name.
 

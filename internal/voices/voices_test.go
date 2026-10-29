@@ -92,3 +92,22 @@ func TestImportRejectsOtherCSV(t *testing.T) {
 		t.Fatal("a bad import replaced the catalog")
 	}
 }
+
+func TestSearchAll(t *testing.T) {
+	c := catalog(t)
+	got, total, err := c.Search(Query{All: true, Limit: 1})
+	if err != nil || len(got) != 4 || total != 4 {
+		t.Fatalf("%d of %d, %v", len(got), total, err)
+	}
+}
+
+func TestAccents(t *testing.T) {
+	got, err := catalog(t).Accents()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []AccentCount{{Accent: "American", Total: 3, Female: 1, Male: 1, Neutral: 1}, {Accent: "Vietnamese", Total: 1, Female: 1}}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("got %+v", got)
+	}
+}
