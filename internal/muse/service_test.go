@@ -581,3 +581,16 @@ func TestDeleteChatWaitsForApproval(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestDeleteUnavailableChatKeepsIt(t *testing.T) {
+	f := newFixture(t, fastTiming())
+	if err := f.chats.Add(fakemuse.BrokenChat); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.DeleteChat(context.Background(), fakemuse.BrokenChat); !errors.Is(err, musepage.ErrChatUnavailable) {
+		t.Fatalf("err = %v", err)
+	}
+	if !f.chats.Known(fakemuse.BrokenChat) {
+		t.Fatal("an unavailable chat was dropped from chats.json without the owner asking")
+	}
+}

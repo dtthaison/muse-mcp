@@ -86,3 +86,27 @@ func TestListOldestFirst(t *testing.T) {
 		t.Fatalf("list %+v", got)
 	}
 }
+
+// Two processes share chats.json: a write keeps what the other one added.
+func TestWritesKeepOtherProcessesChats(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "chats.json")
+	server, cli := Load(path), Load(path)
+	if err := cli.Add("from-cli"); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.Add("from-server"); err != nil {
+		t.Fatal(err)
+	}
+	if re := Load(path); !re.Known("from-cli") || !re.Known("from-server") {
+		t.Fatalf("lost a chat: cli=%v server=%v", re.Known("from-cli"), re.Known("from-server"))
+	}
+	if err := cli.Remove("from-server"); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.Add("again"); err != nil {
+		t.Fatal(err)
+	}
+	if re := Load(path); re.Known("from-server") {
+		t.Fatal("a removed chat came back")
+	}
+}

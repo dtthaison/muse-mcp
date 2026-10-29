@@ -360,3 +360,18 @@ func TestDeleteRefusesAnotherChat(t *testing.T) {
 		t.Fatalf("deleted %v", got)
 	}
 }
+
+// A chat muse can't open (deleted already, or broken) shows "Something went
+// wrong" and no chat switcher.
+func TestDeleteUnavailableChat(t *testing.T) {
+	ctx, srv := openChat(t)
+	if _, err := Open(ctx, ThreadURL(srv.URL, fakemuse.BrokenChat), 15*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteOpenChat(ctx, fakemuse.BrokenChat); !errors.Is(err, ErrChatUnavailable) {
+		t.Fatalf("err = %v", err)
+	}
+	if got := srv.Deleted(); len(got) != 0 {
+		t.Fatalf("deleted %v", got)
+	}
+}

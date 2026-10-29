@@ -106,6 +106,7 @@ muse-mcp chat "what can you do?"
 muse-mcp chat --chat <chat_id> --save out/ "make it red"
 muse-mcp chats                       # the chats muse-mcp started
 muse-mcp chats delete <chat_id>      # delete one in muse
+muse-mcp chats forget <chat_id>      # drop one from the list (muse untouched)
 muse-mcp refs save fox --kind character --desc "a red fox with a white chest" fox.png
 muse-mcp refs list
 muse-mcp status

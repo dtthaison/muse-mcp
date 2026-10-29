@@ -15,6 +15,14 @@ import (
 //go:embed page.html
 var page []byte
 
+// BrokenChat is a chat ID the fake page can't open: like muse.ai for a chat
+// that was deleted, it shows "Something went wrong" and no chat switcher.
+const BrokenChat = "deadbeef-0000-4000-8000-000000000000"
+
+const brokenPage = `<!doctype html><html><body><div data-testid="chat-empty-loading"></div>
+<div><p>Something went wrong</p><button>Try again</button></div>
+<div data-hatch-shell-hydration-state="hydrated"><textarea aria-label="Message"></textarea></div></body></html>`
+
 // The login page moves on by itself once the test "logs in" (SetLoggedOut(false)),
 // like the real page does after the owner finishes logging in.
 const loginPage = `<!doctype html><html><body><h1>Muse</h1><p>Log in or create an account</p>
@@ -55,6 +63,10 @@ func New() *Server {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if s.loggedOut.Load() {
 			w.Write([]byte(loginPage))
+			return
+		}
+		if r.URL.Path == "/thread/"+BrokenChat {
+			w.Write([]byte(brokenPage))
 			return
 		}
 		if s.noConfirm.Load() {
