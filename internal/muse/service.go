@@ -71,8 +71,8 @@ type Options struct {
 type ImageRequest struct {
 	Text        string   // from prompt.Build
 	Attachments []string // from prompt.Build
-	OutputPath  string
-	Media       Media // "" means MediaImage
+	OutputPath  string   // the file; for MediaVoice the folder, named <chat id>-<chat title>.mp3
+	Media       Media    // "" means MediaImage
 }
 
 type ChatRequest struct {
@@ -94,6 +94,7 @@ type Result struct {
 	ChatID   string           `json:"chat_id"`
 	ChatURL  string           `json:"chat_url"`
 	Reply    string           `json:"reply"`
+	Title    string           `json:"title,omitempty"` // the chat's name in muse, for voice clips
 	Images   []output.Saved   `json:"images,omitempty"`
 	Videos   []output.Saved   `json:"videos,omitempty"`
 	Audio    []output.Saved   `json:"audio,omitempty"`
@@ -448,6 +449,9 @@ func (s *Service) runImage(ctx context.Context, id string, t *tab, r *ImageReque
 			return res, nil
 		case Done:
 			defer s.dropTab(id)
+			if r.Media == MediaVoice {
+				res.Title = s.waitTitle(ctx, op, t, *snap)
+			}
 			for _, im := range w.NewMedia(*snap) {
 				save, into := func(data []byte) (output.Saved, error) { return output.Save(data, r.OutputPath) }, &res.Images
 				switch r.Media {
@@ -456,7 +460,10 @@ func (s *Service) runImage(ctx context.Context, id string, t *tab, r *ImageReque
 						return output.SaveVideo(data, r.OutputPath, im.Width, im.Height)
 					}, &res.Videos
 				case MediaVoice:
-					save, into = func(data []byte) (output.Saved, error) { return output.SaveAudio(data, r.OutputPath) }, &res.Audio
+					// OutputPath is a folder; the file is named after the chat.
+					save, into = func(data []byte) (output.Saved, error) {
+						return output.SaveAudioInDir(data, r.OutputPath, output.ChatFileName(id, res.Title, "voice"))
+					}, &res.Audio
 				}
 				saved, err := s.download(op, im, save)
 				if err != nil {
@@ -468,6 +475,22 @@ func (s *Service) runImage(ctx context.Context, id string, t *tab, r *ImageReque
 			return res, nil
 		}
 	}
+}
+
+// waitTitle returns the chat's title, waiting up to Timing.TitleWait for
+// muse to name the chat; empty if it doesn't.
+func (s *Service) waitTitle(ctx context.Context, op context.Context, t *tab, snap musepage.State) string {
+	deadline := s.o.Now().Add(s.o.Timing.TitleWait)
+	for snap.Title == "" && s.o.Now().Before(deadline) {
+		next, err := s.poll(ctx, op, t)
+		if err != nil {
+			return ""
+		}
+		if next != nil {
+			snap = *next
+		}
+	}
+	return snap.Title
 }
 
 func (s *Service) runChat(ctx context.Context, id string, t *tab, r *ChatRequest, w *ChatWait) (Result, error) {

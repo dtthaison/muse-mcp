@@ -288,6 +288,17 @@ func TestVoiceClip(t *testing.T) {
 	}
 }
 
+func TestChatTitle(t *testing.T) {
+	ctx, _ := openChat(t)
+	if s, _ := Snapshot(ctx); s.Title != "" {
+		t.Fatalf("placeholder title %q, want empty", s.Title)
+	}
+	if err := Send(ctx, "[fake:voice]"); err != nil {
+		t.Fatal(err)
+	}
+	until(t, ctx, "the chat title", func(s State) bool { return s.Title == "Fake voice clip" })
+}
+
 func TestVoiceClipsDownloadedSeparately(t *testing.T) {
 	ctx, _ := openChat(t)
 	if err := Send(ctx, "[fake:voices]"); err != nil {

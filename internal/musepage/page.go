@@ -21,18 +21,22 @@ import (
 )
 
 const (
-	selInput        = `textarea`
-	selHydration    = `[data-hatch-shell-hydration-state]`
-	selStop         = `button[aria-label*="Stop" i]`
-	selAgentBubble  = `div[class*="hatch-agent-bubble-bg"]`
-	selResultImage  = `[data-testid="hatch-chat-attachment-presentation-image"] img`
-	selResultVideo  = `[data-testid="hatch-chat-attachment-presentation-video"] video` // other <video>s on the page are decoration
-	selResultAudio  = `[data-testid="hatch-chat-attachment-presentation-audio"]`       // a player card; no <audio> until Play
-	selAttachment   = `[data-testid^="hatch-chat-attachment-presentation-"]`
-	selPlay         = `button[aria-label="Play"]`
-	selApprovalCard = `[data-testid="hatch-inline-approval-card"]`
-	selFileInput    = `input[type="file"]`
-	selRemoveChip   = `button[aria-label="Remove attachment"]`
+	selInput       = `textarea`
+	selHydration   = `[data-hatch-shell-hydration-state]`
+	selStop        = `button[aria-label*="Stop" i]`
+	selAgentBubble = `div[class*="hatch-agent-bubble-bg"]`
+	selResultImage = `[data-testid="hatch-chat-attachment-presentation-image"] img`
+	selResultVideo = `[data-testid="hatch-chat-attachment-presentation-video"] video` // other <video>s on the page are decoration
+	selResultAudio = `[data-testid="hatch-chat-attachment-presentation-audio"]`       // a player card; no <audio> until Play
+	// The chat's title is the first line of the chat switcher; muse shows
+	// "Thread" until it has named the chat.
+	selChatTitle     = `[data-testid="hatch-chat-switcher-trigger"]`
+	titlePlaceholder = "Thread"
+	selAttachment    = `[data-testid^="hatch-chat-attachment-presentation-"]`
+	selPlay          = `button[aria-label="Play"]`
+	selApprovalCard  = `[data-testid="hatch-inline-approval-card"]`
+	selFileInput     = `input[type="file"]`
+	selRemoveChip    = `button[aria-label="Remove attachment"]`
 
 	textLoggedOut = "Log in or create an account"
 )
@@ -78,6 +82,7 @@ type State struct {
 	Images     []Image   `json:"images"`
 	Videos     []Image   `json:"videos"`
 	Audios     []Image   `json:"audios"`
+	Title      string    `json:"title"` // empty until muse names the chat
 	Approval   *Approval `json:"approval"`
 }
 
@@ -121,9 +126,15 @@ var snapshotJS = fmt.Sprintf(`(() => {
       src: v.currentSrc || v.src || '', width: v.videoWidth || 0, height: v.videoHeight || 0 })),
     audios: [...document.querySelectorAll(%[12]s)].map((a, i) => ({ src: 'audio:' + i, width: 0, height: 0 })),
     approval: card ? { text: (card.innerText || '').trim() } : null,
+    title: (() => {
+      const t = document.querySelector(%[13]s);
+      const line = t ? (t.innerText || '').split('\n')[0].trim() : '';
+      return line === %[14]s ? '' : line;
+    })(),
   };
 })()`, q(selInput), q(selHydration), q(selStop), q(selAgentBubble), q(selResultImage),
-	q(selApprovalCard), q(textLoggedOut), mustJSON(stallTexts), pendingCardJS, q(selResultVideo), q(selAttachment), q(selResultAudio))
+	q(selApprovalCard), q(textLoggedOut), mustJSON(stallTexts), pendingCardJS, q(selResultVideo), q(selAttachment), q(selResultAudio),
+	q(selChatTitle), q(titlePlaceholder))
 
 func mustJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
 

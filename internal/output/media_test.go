@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -84,5 +85,20 @@ func TestSaveAudio(t *testing.T) {
 	s, err = SaveAudioInDir(mp3Bytes, dir, "muse-reply")
 	if err != nil || s.Path != filepath.Join(dir, "muse-reply.mp3") {
 		t.Fatalf("%+v %v", s, err)
+	}
+}
+
+func TestChatFileName(t *testing.T) {
+	const id = "123e4567-e89b-42d3-a456-426614174002"
+	for _, tc := range []struct{ title, want string }{
+		{"Generate Vietnamese text to speech", id + "-Generate-Vietnamese-text-to-speech"},
+		{"Giọng đọc: quán trà sữa / khai trương?", id + "-Giọng-đọc-quán-trà-sữa-khai-trương"},
+		{"  ", id + "-voice"},
+		{"", id + "-voice"},
+		{strings.Repeat("ab ", 50), id + "-" + strings.TrimSuffix(strings.Repeat("ab-", 20), "-")},
+	} {
+		if got := ChatFileName(id, tc.title, "voice"); got != tc.want {
+			t.Errorf("%q: got %q, want %q", tc.title, got, tc.want)
+		}
 	}
 }
