@@ -149,10 +149,11 @@ are proven against the live site and are the best reference for the page logic.
   actions" button only shows while the mouse is over the row and opens Pin,
   Rename, Archive and Delete; it needs real mouse events. A message's "More
   options" menu also has a Delete, for that message only. What muse does
-  after Delete (a confirmation dialog or not, where it goes) wasn't checked
-  live, so muse-mcp clicks a confirm button if a dialog shows one and counts
-  the chat as deleted once muse leaves it or the open panel stops listing
-  it. muse-mcp deletes only chats in chats.json, and only when asked.
+  after Delete (a confirmation dialog or not, where it goes) wasn't watched,
+  so muse-mcp clicks a confirm button if a dialog shows one and counts the
+  chat as deleted once muse leaves it or the open panel stops listing it.
+  Checked live with `muse-mcp chats delete` on 2026-10-29: the chat was
+  deleted, and opening it afterwards shows "Something went wrong". muse-mcp deletes only chats in chats.json, and only when asked.
 - A chat muse can't open (24 test chats from 2026-10-29, probably deleted in
   muse afterwards) shows "Something went wrong" with "Try again" and
   `chat-empty-loading`, and no chat switcher. The composer is ready seconds
