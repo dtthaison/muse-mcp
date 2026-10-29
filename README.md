@@ -49,7 +49,7 @@ again." The window hides itself once muse.ai shows your chats.
 |---|---|
 | `muse_generate_image` | Makes an image and saves it to `output_path` (`.png`, `.jpg`/`.jpeg` or `.webp`). Takes about a minute. |
 | `muse_generate_video` | **Experimental, under testing.** Makes a short video and saves it to `output_path` (`.mp4` or `.webm`). See [Video](#video-experimental). |
-| `muse_generate_voice` | **Experimental, under testing.** Makes a text-to-speech clip and saves it to `output_path` (`.mp3`). See [Voice](#voice-experimental). |
+| `muse_generate_voice` | **Experimental, under testing.** Makes a text-to-speech clip and saves it in `output_dir` as `<chat id>-<chat title>.mp3`. See [Voice](#voice-experimental). |
 | `muse_list_voices` | Searches muse's voice catalog by words, gender, accent or tone. |
 | `muse_chat` | Sends a message to your muse agent. Pass `chat_id` to continue a conversation; `save_images_to` saves any images, videos or audio clips it sends. |
 | `muse_decide_approval` | Approves or denies something muse asked permission to do. |
@@ -77,7 +77,7 @@ The same binary works without Claude Code:
 muse-mcp image -o fox.png "a red fox in a snowy forest"
 muse-mcp image -o fox-asleep.png --character fox --scene snowy-forest --change "the fox is asleep"
 muse-mcp video -o steam.mp4 --ref teapot.png "steam rises from the teapot"   # experimental
-muse-mcp voice -o hello.mp3 --voice Helio "Hello from muse."             # experimental
+muse-mcp voice -o clips --voice Helio "Hello from muse."                 # experimental
 muse-mcp voices --gender female --accent british warm
 muse-mcp chat "what can you do?"
 muse-mcp chat --chat <chat_id> --save out/ "make it red"
@@ -107,7 +107,11 @@ keeps the `.webm` extension.
 ## Voice (experimental)
 
 `muse_generate_voice` and `muse-mcp voice` make a text-to-speech clip of the
-exact text you give and save it as `.mp3`. Pass a voice name (for example
+exact text you give and save it as `.mp3` in a folder (`output_dir`, `-o`;
+the current folder by default). The file is named after muse's chat:
+`<chat id>-<chat title>.mp3`, for example
+`5d0f89f3-d78e-4f1d-b212-5d62a3b3b8fe-Generate-Vietnamese-text-to-speech.mp3`,
+or `<chat id>-voice.mp3` if muse hasn't named the chat. Pass a voice name (for example
 `Helio` or `Aria`) or leave it out and muse picks one.
 
 muse's voice tool takes only a voice, a language and a speed (1 to 200, 100
@@ -125,7 +129,7 @@ written:
 | confident | 100 | short strong sentences, no hesitation words |
 
 ```sh
-muse-mcp voice -o open.mp3 --voice "Sparkling Whistle" --language "Vietnamese (vi-VN)" --speed 120 \
+muse-mcp voice -o clips --voice "Sparkling Whistle" --language "Vietnamese (vi-VN)" --speed 120 \
   "Quán trà sữa Mây khai trương rồi! Mua một tặng một! Ghé quán ngay nhé!"
 ```
 

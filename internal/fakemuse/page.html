@@ -19,6 +19,7 @@
   [fake:slow] [fake:echo-attachments] [fake:video] [fake:textonly-video]
   [fake:decor-video] [fake:voice] [fake:voices]
 -->
+<button data-testid="hatch-chat-switcher-trigger"><div id="chat-title">Thread</div><div>Open chat and side chats</div></button>
 <main><div id="log"></div></main>
 <div id="composer" data-hatch-shell-hydration-state="hydrating">
   <div id="chips"></div>
@@ -227,6 +228,8 @@ async function respond(text, names) {
     case 'voice':
       bubble('Here is your clip.');
       voiceClip();
+      // muse names the chat once it has replied.
+      setTimeout(() => { document.getElementById('chat-title').textContent = 'Fake voice clip'; }, 300);
       break;
     case 'voices':
       bubble('Here are two clips.');

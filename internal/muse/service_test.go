@@ -31,7 +31,7 @@ func fastTiming() Timing {
 		TextOnlyGrace: 500 * time.Millisecond, ChatTimeout: 3 * time.Second, ChatMax: 6 * time.Second,
 		// ChatForcePolls is ~18s in production (12 × 1.5s); 100 × 50ms keeps a comparable window.
 		ChatStable: 300 * time.Millisecond, ChatForcePolls: 100, ApprovalTimeout: 5 * time.Second,
-		Unresponsive: time.Second}
+		Unresponsive: time.Second, TitleWait: time.Second}
 }
 
 type fixture struct {
@@ -497,18 +497,35 @@ func TestLoginWaitsForOwner(t *testing.T) {
 	}
 }
 
-func TestGenerateVoiceSavesFile(t *testing.T) {
+// A voice clip goes into the output folder as <chat id>-<chat title>.mp3.
+func TestGenerateVoiceNamesFileAfterChat(t *testing.T) {
 	f := newFixture(t, fastTiming())
 	res, err := f.svc.GenerateImage(context.Background(), ImageRequest{Text: "[fake:voice] hello", Media: MediaVoice,
-		OutputPath: filepath.Join(f.out, "hello.mp3")})
+		OutputPath: f.out})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != "done" || res.Reply != "Here is your clip." || len(res.Audio) != 1 || res.Audio[0].Path != filepath.Join(f.out, "hello.mp3") {
-		t.Fatalf("result %+v", res)
+	want := filepath.Join(f.out, res.ChatID+"-Fake-voice-clip.mp3")
+	if res.Status != "done" || res.Reply != "Here is your clip." || res.Title != "Fake voice clip" ||
+		len(res.Audio) != 1 || res.Audio[0].Path != want {
+		t.Fatalf("result %+v, want file %s", res, want)
 	}
-	if data, _ := os.ReadFile(res.Audio[0].Path); !bytes.Contains(data, []byte("clip-0")) {
+	if data, _ := os.ReadFile(want); !bytes.Contains(data, []byte("clip-0")) {
 		t.Fatalf("file %q", data)
+	}
+}
+
+// When muse never names the chat, the name falls back to <chat id>-voice.
+func TestGenerateVoiceWithoutTitle(t *testing.T) {
+	f := newFixture(t, fastTiming())
+	res, err := f.svc.GenerateImage(context.Background(), ImageRequest{Text: "[fake:voices] hello", Media: MediaVoice,
+		OutputPath: f.out})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Audio) != 2 || res.Audio[0].Path != filepath.Join(f.out, res.ChatID+"-voice.mp3") ||
+		res.Audio[1].Path != filepath.Join(f.out, res.ChatID+"-voice-1.mp3") {
+		t.Fatalf("result %+v", res)
 	}
 }
 

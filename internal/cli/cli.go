@@ -73,8 +73,8 @@ Usage:
       --ref-notes TEXT     what the extra references are for
       --aspect RATIO       e.g. 16:9
 
-  muse-mcp voice -o OUT.mp3 [--voice NAME] [--language L] [--speed 1-200] [--force] TEXT
-                                   (experimental; 100 is normal speed)
+  muse-mcp voice [-o DIR] [--voice NAME] [--language L] [--speed 1-200] [--force] TEXT
+                                   (experimental; saves DIR/<chat id>-<chat title>.mp3)
   muse-mcp voices [--gender G] [--accent A] [--tone T] [--limit N | --all] [WORDS]
   muse-mcp voices accents          how many voices each accent has
   muse-mcp voices import FILE.csv   muse's voice catalog (ask muse for it as CSV)
@@ -342,7 +342,7 @@ func (r *runner) generate(ctx context.Context, cmd string, args []string) int {
 func (r *runner) voice(ctx context.Context, args []string) int {
 	fs := r.newFlags("voice")
 	var a tools.VoiceArgs
-	fs.StringVar(&a.OutputPath, "o", "", "output file")
+	fs.StringVar(&a.OutputDir, "o", ".", "output folder")
 	fs.StringVar(&a.Voice, "voice", "", "voice name")
 	fs.StringVar(&a.Language, "language", "", "language and locale, e.g. Vietnamese (vi-VN)")
 	fs.IntVar(&a.Speed, "speed", 0, "1 to 200, 100 is normal")
@@ -351,9 +351,6 @@ func (r *runner) voice(ctx context.Context, args []string) int {
 	rest, err := parse(fs, args)
 	if err != nil {
 		return exitUsage
-	}
-	if a.OutputPath == "" {
-		return r.usageErr("voice needs -o OUTPUT")
 	}
 	a.Text = strings.Join(rest, " ")
 	req, err := tools.BuildVoiceRequest(a)

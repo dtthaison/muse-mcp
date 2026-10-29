@@ -341,16 +341,26 @@ func TestStatusBeforeChromeStarts(t *testing.T) {
 
 func TestVoice(t *testing.T) {
 	h := newHarness(t)
-	h.svc.result.Audio = []output.Saved{{Path: "/w/hi.mp3", Bytes: 16 << 10}}
-	if code := h.run("", true, "voice", "-o", "hi.mp3", "--voice", "Helio", "--speed", "85", "Xin chào", "bạn"); code != 0 {
+	h.svc.result.Audio = []output.Saved{{Path: "/w/c1-Hello.mp3", Bytes: 16 << 10}}
+	if code := h.run("", true, "voice", "-o", "clips", "--voice", "Helio", "--speed", "85", "Xin chào", "bạn"); code != 0 {
 		t.Fatalf("code=%d stderr=%q", code, h.errOut.String())
 	}
 	got := h.svc.images[0]
-	if got.Media != muse.MediaVoice || !strings.Contains(got.Text, `Voice: "Helio"`) || !strings.Contains(got.Text, "Xin chào bạn") {
+	if got.Media != muse.MediaVoice || got.OutputPath != "clips" || !strings.Contains(got.Text, `Voice: "Helio"`) || !strings.Contains(got.Text, "Xin chào bạn") {
 		t.Fatalf("request %+v", got)
 	}
-	if !strings.Contains(h.out.String(), "saved /w/hi.mp3 (16 KB)") {
+	if !strings.Contains(h.out.String(), "saved /w/c1-Hello.mp3 (16 KB)") {
 		t.Fatalf("stdout %q", h.out.String())
+	}
+}
+
+func TestVoiceDefaultsToCurrentFolder(t *testing.T) {
+	h := newHarness(t)
+	if code := h.run("", true, "voice", "Xin chào"); code != 0 || h.svc.images[0].OutputPath != "." {
+		t.Fatalf("code=%d stderr=%q request %+v", code, h.errOut.String(), h.svc.images)
+	}
+	if code := h.run("", true, "voice", "-o", "hi.mp3", "Xin chào"); code != 1 || !strings.Contains(h.errOut.String(), "folder") {
+		t.Fatalf("file name: code=%d stderr=%q", code, h.errOut.String())
 	}
 }
 
@@ -395,18 +405,18 @@ func TestVoicesAllAndAccents(t *testing.T) {
 
 func TestVoiceDirectionAndWarnings(t *testing.T) {
 	h := newHarness(t)
-	if code := h.run("", true, "voice", "-o", "a.mp3", "--language", "Vietnamese (vi-VN)", "--speed", "120",
+	if code := h.run("", true, "voice", "--language", "Vietnamese (vi-VN)", "--speed", "120",
 		"Xin chào các bạn"); code != 0 {
 		t.Fatalf("code=%d stderr=%q", code, h.errOut.String())
 	}
 	if got := h.svc.images[0].Text; !strings.Contains(got, "Language: Vietnamese (vi-VN)") || !strings.Contains(got, "Speed: 120 ") {
 		t.Fatalf("text %q", got)
 	}
-	if code := h.run("", true, "voice", "-o", "a.mp3", "Giá 199.000đ"); code != 1 || len(h.svc.images) != 1 ||
+	if code := h.run("", true, "voice", "Giá 199.000đ"); code != 1 || len(h.svc.images) != 1 ||
 		!strings.Contains(h.errOut.String(), "digits") || !strings.Contains(h.errOut.String(), "--force") {
 		t.Fatalf("code=%d calls=%d stderr=%q", code, len(h.svc.images), h.errOut.String())
 	}
-	if code := h.run("", true, "voice", "-o", "a.mp3", "--force", "Giá 199.000đ"); code != 0 || len(h.svc.images) != 2 {
+	if code := h.run("", true, "voice", "--force", "Giá 199.000đ"); code != 0 || len(h.svc.images) != 2 {
 		t.Fatalf("--force: code=%d stderr=%q", code, h.errOut.String())
 	}
 }

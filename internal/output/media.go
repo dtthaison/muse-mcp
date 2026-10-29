@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 )
 
 // media is a kind of file saved as muse sent it, without conversion.
@@ -83,4 +84,33 @@ func SaveAudio(data []byte, outPath string) (Saved, error) {
 // SaveAudioInDir writes data as dir/base.mp3 (or .wav, .ogg).
 func SaveAudioInDir(data []byte, dir, base string) (Saved, error) {
 	return SaveAudio(data, filepath.Join(dir, base+".mp3"))
+}
+
+// ChatFileName is a file name, without extension, for a result from one muse
+// chat: the chat ID, then the chat's title with anything but letters and
+// digits turned into single dashes (at most 60 characters), or fallback when
+// the title is empty.
+func ChatFileName(chatID, title, fallback string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range title {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.Is(unicode.Mn, r) {
+			if dash && b.Len() > 0 {
+				b.WriteByte('-')
+			}
+			b.WriteRune(r)
+			dash = false
+		} else {
+			dash = true
+		}
+	}
+	slug := []rune(b.String())
+	if len(slug) > 60 {
+		slug = slug[:60]
+	}
+	s := strings.Trim(string(slug), "-")
+	if s == "" {
+		s = fallback
+	}
+	return chatID + "-" + s
 }

@@ -262,7 +262,7 @@ func TestGenerateVideo(t *testing.T) {
 
 func TestGenerateVoice(t *testing.T) {
 	svc, _, cs := setup(t)
-	res, text := call(t, cs, "muse_generate_voice", map[string]any{"output_path": "hi.mp3", "text": "Xin chào các bạn",
+	res, text := call(t, cs, "muse_generate_voice", map[string]any{"output_dir": "clips", "text": "Xin chào các bạn",
 		"voice": "Helio", "language": "Vietnamese (vi-VN)", "speed": 85})
 	if res.IsError || len(svc.images) != 1 {
 		t.Fatalf("isError=%v text=%q", res.IsError, text)
@@ -273,18 +273,22 @@ func TestGenerateVoice(t *testing.T) {
 			t.Fatalf("missing %q in:\n%s", want, got.Text)
 		}
 	}
-	if got.Media != muse.MediaVoice || got.OutputPath != "hi.mp3" || len(got.Attachments) != 0 {
+	if got.Media != muse.MediaVoice || got.OutputPath != "clips" || len(got.Attachments) != 0 {
 		t.Fatalf("request %+v", got)
 	}
-	res, text = call(t, cs, "muse_generate_voice", map[string]any{"output_path": "hi.mp4", "text": "x"})
-	if !res.IsError || !strings.Contains(text, ".mp3") || len(svc.images) != 1 {
+	// The file is named after the chat, so a file name is refused.
+	res, text = call(t, cs, "muse_generate_voice", map[string]any{"output_dir": "hi.mp3", "text": "x"})
+	if !res.IsError || !strings.Contains(text, "folder") || len(svc.images) != 1 {
 		t.Fatalf("isError=%v text=%q", res.IsError, text)
+	}
+	if res, text := call(t, cs, "muse_generate_voice", map[string]any{"text": "Xin chào"}); res.IsError || svc.images[1].OutputPath != "." {
+		t.Fatalf("default folder: isError=%v text=%q request %+v", res.IsError, text, svc.images[1])
 	}
 }
 
 func TestVoiceScriptWarningsBlockUntilIgnored(t *testing.T) {
 	svc, _, cs := setup(t)
-	args := map[string]any{"output_path": "ad.mp3", "text": "Giá chỉ 199.000đ, xem tại https://shop.vn"}
+	args := map[string]any{"text": "Giá chỉ 199.000đ, xem tại https://shop.vn"}
 	res, text := call(t, cs, "muse_generate_voice", args)
 	if !res.IsError || !strings.Contains(text, "digits") || !strings.Contains(text, "link") ||
 		!strings.Contains(text, "ignore_script_warnings") || len(svc.images) != 0 {
