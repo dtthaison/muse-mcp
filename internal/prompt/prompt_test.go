@@ -161,23 +161,73 @@ func TestVideoWording(t *testing.T) {
 }
 
 func TestVoice(t *testing.T) {
-	b, err := Voice(VoiceInput{Text: "Xin chào!\nHello.", Voice: "Helio", Style: "slow and warm."})
+	b, err := Voice(VoiceInput{Text: "Xin chào!\nHello.", Voice: "Helio", Language: "Vietnamese (vi-VN)",
+		Dialect: "Southern (Saigon)", UseCase: "30-second shop video", Style: "warm, friendly."})
 	if err != nil {
 		t.Fatal(err)
 	}
-	contains(t, b.Text, `with the voice "Helio"`)
-	contains(t, b.Text, "Style: slow and warm.")
-	contains(t, b.Text, "\"\"\"\nXin chào!\nHello.\n\"\"\"")
-	contains(t, b.Text, "Attach the final audio clip here in the chat as a single audio file.")
+	want := `Generate a voice clip (text to speech) and attach it here in the chat as a single audio file.
+
+Voice: "Helio" from your voice catalog.
+
+Direction (how to say it; do not read this part aloud):
+- Language: Vietnamese (vi-VN)
+- Dialect: Southern (Saigon)
+- Use: 30-second shop video
+- Style: warm, friendly
+
+Script (say exactly this, word for word; add nothing, leave nothing out):
+"""
+Xin chào!
+Hello.
+"""`
+	if b.Text != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", b.Text, want)
+	}
 	if len(b.Attachments) != 0 {
 		t.Fatalf("attachments %v", b.Attachments)
 	}
 	b, _ = Voice(VoiceInput{Text: "hi"})
-	contains(t, b.Text, "Pick a voice that suits the text.")
+	contains(t, b.Text, "Voice: pick one from your voice catalog that suits the script.")
+	if strings.Contains(b.Text, "Direction") {
+		t.Fatalf("empty direction block:\n%s", b.Text)
+	}
 	if _, err := Voice(VoiceInput{Text: "  "}); err == nil {
 		t.Fatal("want error for empty text")
 	}
 	if !strings.Contains(NudgeVoice, "audio") {
 		t.Fatal(NudgeVoice)
+	}
+}
+
+func TestCheckScript(t *testing.T) {
+	for _, tc := range []struct {
+		text, lang, want string
+	}{
+		{"Giá chỉ 199.000đ", "", "digits"},
+		{"Giảm năm mươi phần trăm %", "", "%"},
+		{"Xem tại https://shop.vn nhé", "", "link"},
+		{"Email us at a@b.com", "", "link"},
+		{"Hello 😀 there", "", "emoji"},
+		{"[whispers] hello", "", "brackets"},
+		{"Say <break time=\"1s\"/> now", "", "brackets"},
+		{"**Big** sale", "", "markdown"},
+		{"Lan: chào bạn\nMinh: chào", "", "speaker"},
+		{"xin chao cac ban, hom nay troi dep", "Vietnamese (vi-VN)", "tone marks"},
+		{strings.Repeat("word ", 1000), "", "long"},
+	} {
+		got := strings.Join(CheckScript(tc.text, tc.lang), " | ")
+		if !strings.Contains(got, tc.want) {
+			t.Errorf("%q: warnings %q, want one mentioning %q", tc.text, got, tc.want)
+		}
+	}
+	for _, ok := range []struct{ text, lang string }{
+		{"Xin chào, hôm nay trời đẹp quá, chúng ta cùng đi dạo nhé!", "Vietnamese"},
+		{"Hello there. It's a lovely day, isn't it?", "English"},
+		{"Guten Tag! Heute ist ein schöner Tag.", ""},
+	} {
+		if w := CheckScript(ok.text, ok.lang); len(w) != 0 {
+			t.Errorf("%q: unexpected warnings %q", ok.text, w)
+		}
 	}
 }

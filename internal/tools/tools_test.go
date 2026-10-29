@@ -262,17 +262,36 @@ func TestGenerateVideo(t *testing.T) {
 
 func TestGenerateVoice(t *testing.T) {
 	svc, _, cs := setup(t)
-	res, text := call(t, cs, "muse_generate_voice", map[string]any{"output_path": "hi.mp3", "text": "Xin chào", "voice": "Helio", "style": "calm"})
+	res, text := call(t, cs, "muse_generate_voice", map[string]any{"output_path": "hi.mp3", "text": "Xin chào các bạn",
+		"voice": "Helio", "language": "Vietnamese (vi-VN)", "dialect": "Southern (Saigon)", "use_case": "shop video", "style": "calm"})
 	if res.IsError || len(svc.images) != 1 {
 		t.Fatalf("isError=%v text=%q", res.IsError, text)
 	}
 	got := svc.images[0]
-	if got.Media != muse.MediaVoice || got.OutputPath != "hi.mp3" || !strings.Contains(got.Text, `with the voice "Helio"`) ||
-		!strings.Contains(got.Text, "Xin chào") || len(got.Attachments) != 0 {
+	for _, want := range []string{`Voice: "Helio"`, "- Language: Vietnamese (vi-VN)", "- Dialect: Southern (Saigon)", "- Use: shop video", "- Style: calm", "Xin chào các bạn"} {
+		if !strings.Contains(got.Text, want) {
+			t.Fatalf("missing %q in:\n%s", want, got.Text)
+		}
+	}
+	if got.Media != muse.MediaVoice || got.OutputPath != "hi.mp3" || len(got.Attachments) != 0 {
 		t.Fatalf("request %+v", got)
 	}
 	res, text = call(t, cs, "muse_generate_voice", map[string]any{"output_path": "hi.mp4", "text": "x"})
 	if !res.IsError || !strings.Contains(text, ".mp3") || len(svc.images) != 1 {
+		t.Fatalf("isError=%v text=%q", res.IsError, text)
+	}
+}
+
+func TestVoiceScriptWarningsBlockUntilIgnored(t *testing.T) {
+	svc, _, cs := setup(t)
+	args := map[string]any{"output_path": "ad.mp3", "text": "Giá chỉ 199.000đ, xem tại https://shop.vn"}
+	res, text := call(t, cs, "muse_generate_voice", args)
+	if !res.IsError || !strings.Contains(text, "digits") || !strings.Contains(text, "link") ||
+		!strings.Contains(text, "ignore_script_warnings") || len(svc.images) != 0 {
+		t.Fatalf("isError=%v text=%q calls=%d", res.IsError, text, len(svc.images))
+	}
+	args["ignore_script_warnings"] = true
+	if res, text := call(t, cs, "muse_generate_voice", args); res.IsError || len(svc.images) != 1 {
 		t.Fatalf("isError=%v text=%q", res.IsError, text)
 	}
 }
