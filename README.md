@@ -54,6 +54,7 @@ again." The window hides itself once muse.ai shows your chats.
 | `muse_list_voices` | Searches muse's voice catalog by words, gender, accent or tone. |
 | `muse_chat` | Sends a message to your muse agent. Pass `chat_id` to continue a conversation; `save_images_to` saves any images, videos or audio clips it sends. |
 | `muse_decide_approval` | Approves or denies something muse asked permission to do. |
+| `muse_list_chats` / `muse_delete_chat` | The chats muse-mcp started, and deleting one of them in muse (cannot be undone). |
 | `muse_save_reference` / `muse_list_references` / `muse_delete_reference` | Saved characters and scenes. |
 | `muse_status` | Whether Chrome is running, whether you're logged in, and pending approvals. |
 
@@ -103,6 +104,8 @@ muse-mcp speech -o clips --voice Helio "Hello from muse."                # exper
 muse-mcp voices --gender female --accent british warm
 muse-mcp chat "what can you do?"
 muse-mcp chat --chat <chat_id> --save out/ "make it red"
+muse-mcp chats                       # the chats muse-mcp started
+muse-mcp chats delete <chat_id>      # delete one in muse
 muse-mcp refs save fox --kind character --desc "a red fox with a white chest" fox.png
 muse-mcp refs list
 muse-mcp status
@@ -210,8 +213,11 @@ approved). Open the chat in muse.ai to decide them there.
 - **muse remembers.** muse's agent keeps memory and a workspace across all
   chats, including your own. Each image request starts a new muse chat, but
   that chat is not a blank slate.
-- Every request adds a chat to your muse chat list.
-- muse-mcp only continues chats it started itself. It never touches yours.
+- Every request adds a chat to your muse chat list. muse-mcp never deletes
+  one by itself: you (`muse-mcp chats delete`) or Claude (`muse_delete_chat`)
+  decide. Deleting can't be undone, and the chat's images and clips go with
+  it in muse; files muse-mcp saved stay.
+- muse-mcp only continues or deletes chats it started itself. It never touches yours.
 - One request runs at a time.
 - Relative `output_path`s resolve against the directory Claude Code started
   the server in.
@@ -220,7 +226,8 @@ approved). Open the chat in muse.ai to decide them there.
 
 Everything lives in `~/.muse-mcp/` (override with `MUSE_MCP_HOME`):
 `chrome-profile/` (your muse login), `library/` (saved references),
-`voices.csv` (the imported voice catalog), `chats.json`, `muse-mcp.log`.
+`voices.csv` (the imported voice catalog), `chats.json` (the chats muse-mcp
+started), `muse-mcp.log`.
 
 ## Development
 

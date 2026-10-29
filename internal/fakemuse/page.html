@@ -8,6 +8,9 @@
   .hatch-agent-bubble-bg-fake { background: #eef; margin: 4px; padding: 4px; }
   .user { background: #efe; margin: 4px; padding: 4px; }
   input[type=file] { display: none; }
+  .row { display: flex; gap: 8px; width: 240px; padding: 6px; }
+  .row button { visibility: hidden; }
+  .row:hover button { visibility: visible; }
 </style>
 </head>
 <body>
@@ -18,8 +21,12 @@
   [fake:approval-oddlabel] [fake:approval-sticky] [fake:send-trap] [fake:chat]
   [fake:slow] [fake:echo-attachments] [fake:video] [fake:textonly-video]
   [fake:decor-video] [fake:voice] [fake:voices]
+  The chat switcher opens a side-chats panel like muse's: the open chat's
+  row has aria-current="page", and its "More thread actions" button only
+  shows on hover. Its Delete asks for confirmation unless the server says not.
 -->
 <button data-testid="hatch-chat-switcher-trigger"><div id="chat-title">Thread</div><div>Open chat and side chats</div></button>
+<div id="side" data-testid="hatch-side-chats-panel-shell" hidden></div>
 <main><div id="log"></div></main>
 <div id="composer" data-hatch-shell-hydration-state="hydrating">
   <div id="chips"></div>
@@ -39,6 +46,75 @@ let attached = [];
 let mode = '';
 
 setTimeout(() => composer.setAttribute('data-hatch-shell-hydration-state', 'hydrated'), 200);
+
+const deleteConfirm = true;
+const side = document.getElementById('side');
+const openChatID = () => (location.pathname.match(/^\/thread\/([0-9a-f-]{36})$/) || [])[1];
+
+async function deleteChat(id) {
+  await fetch('/__deleted', { method: 'POST', body: id });
+  location.href = '/';
+}
+
+function threadMenu(button, id) {
+  document.querySelectorAll('[role=menu]').forEach(m => m.remove());
+  const menu = document.createElement('div');
+  menu.setAttribute('role', 'menu');
+  for (const label of ['Pin', 'Rename', 'Archive', 'Delete']) {
+    const item = document.createElement('div');
+    item.setAttribute('role', 'menuitem');
+    item.textContent = label;
+    if (label === 'Delete') {
+      item.addEventListener('click', () => {
+        menu.remove();
+        if (!deleteConfirm) return deleteChat(id);
+        const dlg = document.createElement('div');
+        dlg.setAttribute('role', 'alertdialog');
+        const p = document.createElement('p');
+        p.textContent = 'Delete chat? This cannot be undone.';
+        const cancel = document.createElement('button');
+        cancel.textContent = 'Cancel';
+        cancel.addEventListener('click', () => dlg.remove());
+        const ok = document.createElement('button');
+        ok.textContent = 'Delete';
+        ok.addEventListener('click', () => deleteChat(id));
+        dlg.append(p, cancel, ok);
+        document.body.appendChild(dlg);
+      });
+    }
+    menu.appendChild(item);
+  }
+  button.after(menu);
+}
+
+function sideRow(title, id, current) {
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.setAttribute('data-testid', 'hatch-thread-row');
+  row.setAttribute('role', 'button');
+  if (current) row.setAttribute('aria-current', 'page');
+  const span = document.createElement('span');
+  span.title = title;
+  span.textContent = title;
+  row.appendChild(span);
+  if (id) {
+    const more = document.createElement('button');
+    more.setAttribute('aria-label', 'More thread actions');
+    more.textContent = '...';
+    more.addEventListener('click', e => { e.stopPropagation(); threadMenu(more, id); });
+    row.appendChild(more);
+  }
+  side.appendChild(row);
+}
+
+document.querySelector('[data-testid="hatch-chat-switcher-trigger"]').addEventListener('click', () => {
+  side.hidden = !side.hidden;
+  side.innerHTML = '';
+  sideRow('Main chat', '', false);
+  sideRow("Owner's chat", '00000000-0000-4000-8000-000000000000', false);
+  const id = openChatID();
+  if (id) sideRow(document.getElementById('chat-title').textContent, id, true);
+});
 
 fileInput.addEventListener('change', () => {
   for (const f of fileInput.files) {

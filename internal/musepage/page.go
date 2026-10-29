@@ -37,6 +37,13 @@ const (
 	selApprovalCard  = `[data-testid="hatch-inline-approval-card"]`
 	selFileInput     = `input[type="file"]`
 	selRemoveChip    = `button[aria-label="Remove attachment"]`
+	// The chat switcher opens the side-chats panel. The open chat's row has
+	// aria-current="page"; its "More thread actions" button (Pin, Rename,
+	// Archive, Delete) only shows while the mouse is over the row, so it is
+	// clicked with real mouse events. Rows carry no chat ID.
+	selSidePanel  = `[data-testid="hatch-side-chats-panel-shell"]`
+	selCurrentRow = `[data-testid="hatch-thread-row"][aria-current="page"]`
+	selRowMenu    = `button[aria-label="More thread actions"]`
 
 	textLoggedOut = "Log in or create an account"
 )
@@ -346,6 +353,121 @@ func Decide(ctx context.Context, approve bool) error {
 	default:
 		return ErrNoButton
 	}
+}
+
+// confirmDeleteLabels match the confirm button of a delete dialog, if muse
+// shows one (unverified: the live check stopped before clicking Delete).
+const confirmDeleteLabels = `^(delete|delete chat|confirm|yes)$`
+
+// DeleteOpenChat deletes the chat open in this tab, which must be chat id:
+// the open chat's row in the side-chats panel, More thread actions, Delete,
+// and the confirmation if muse asks for one. It returns once muse has left
+// the chat or dropped its row.
+func DeleteOpenChat(ctx context.Context, id string) error {
+	st, err := Snapshot(ctx)
+	if err != nil {
+		return err
+	}
+	if open, _ := ThreadID(st.URL); open != id {
+		return fmt.Errorf("the tab shows %s, not chat %s; nothing was deleted", st.URL, id)
+	}
+	row := fmt.Sprintf(`document.querySelector(%s)`, q(selCurrentRow))
+	if _, err := centre(ctx, row); err != nil {
+		if err := click(ctx, fmt.Sprintf(`document.querySelector(%s)`, q(selChatTitle))); err != nil {
+			return fmt.Errorf("opening the side chats: %w", err)
+		}
+	}
+	pt, err := waitCentre(ctx, row, 5*time.Second)
+	if err != nil {
+		return fmt.Errorf("muse shows no row for the open chat: %w", err)
+	}
+	if err := chromedp.Do(ctx, chromedp.MouseEvent(chromedp.MouseMoved, pt[0], pt[1])); err != nil {
+		return err
+	}
+	menu := fmt.Sprintf(`document.querySelector(%s)?.querySelector(%s)`, q(selCurrentRow), q(selRowMenu))
+	if err := waitClick(ctx, menu, "the chat's menu"); err != nil {
+		return err
+	}
+	item := `[...document.querySelectorAll('[role=menuitem]')].find(m => m.innerText.trim() === 'Delete')`
+	if err := waitClick(ctx, item, "Delete in the chat's menu"); err != nil {
+		return err
+	}
+	confirm := fmt.Sprintf(`[...document.querySelectorAll('[role=alertdialog],[role=dialog]')]
+  .flatMap(d => [...d.querySelectorAll('button')])
+  .find(b => new RegExp(%s, 'i').test(b.innerText.trim()))`, q(confirmDeleteLabels))
+	// Deleted: muse left the chat, or the open panel no longer lists it. A
+	// panel that closed with the menu proves nothing.
+	gone := fmt.Sprintf(`!location.pathname.includes(%s) || (!!document.querySelector(%s)?.getClientRects().length
+  && !document.querySelector(%s) && !document.querySelector('[role=alertdialog],[role=dialog]'))`,
+		q(id), q(selSidePanel), q(selCurrentRow))
+	confirmed := false
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if done, err := chromedp.Run(ctx, chromedp.Evaluate[bool](gone)); err == nil && done {
+			return nil
+		}
+		if !confirmed {
+			if _, err := centre(ctx, confirm); err == nil {
+				if err := click(ctx, confirm); err != nil {
+					return err
+				}
+				confirmed = true
+			}
+		}
+		if err := sleep(ctx, 200*time.Millisecond); err != nil {
+			return err
+		}
+	}
+	return errors.New("muse did not delete the chat; check it in muse.ai")
+}
+
+// centre scrolls the element el (a JS expression) into view and returns the
+// middle of its box.
+func centre(ctx context.Context, el string) ([]float64, error) {
+	pt, err := chromedp.Run(ctx, chromedp.Evaluate[[]float64](fmt.Sprintf(`(() => {
+  const e = %s;
+  if (!e) return [];
+  e.scrollIntoView({block: 'center'});
+  const r = e.getBoundingClientRect();
+  return r.width > 0 && r.height > 0 ? [r.x + r.width / 2, r.y + r.height / 2] : [];
+})()`, el)))
+	if err != nil {
+		return nil, err
+	}
+	if len(pt) != 2 {
+		return nil, errors.New("not on the page")
+	}
+	return pt, nil
+}
+
+// click clicks the middle of el with real mouse events (muse's menus ignore
+// a scripted click).
+func click(ctx context.Context, el string) error {
+	pt, err := centre(ctx, el)
+	if err != nil {
+		return err
+	}
+	return chromedp.Do(ctx, chromedp.MouseClickXY(pt[0], pt[1]))
+}
+
+func waitCentre(ctx context.Context, el string, limit time.Duration) ([]float64, error) {
+	deadline := time.Now().Add(limit)
+	for {
+		pt, err := centre(ctx, el)
+		if err == nil || time.Now().After(deadline) {
+			return pt, err
+		}
+		if err := sleep(ctx, 200*time.Millisecond); err != nil {
+			return nil, err
+		}
+	}
+}
+
+func waitClick(ctx context.Context, el, what string) error {
+	if _, err := waitCentre(ctx, el, 5*time.Second); err != nil {
+		return fmt.Errorf("%s: %w", what, err)
+	}
+	return click(ctx, el)
 }
 
 func sleep(ctx context.Context, d time.Duration) error {

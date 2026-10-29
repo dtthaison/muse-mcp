@@ -539,3 +539,45 @@ func TestChatSavesAudio(t *testing.T) {
 		t.Fatalf("result %+v", res)
 	}
 }
+
+func TestDeleteChat(t *testing.T) {
+	f := newFixture(t, fastTiming())
+	res, err := f.svc.Chat(context.Background(), ChatRequest{Message: "[fake:chat]"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.DeleteChat(context.Background(), res.ChatID); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.srv.Deleted(); len(got) != 1 || got[0] != res.ChatID {
+		t.Fatalf("deleted %v, want [%s]", got, res.ChatID)
+	}
+	if f.chats.Known(res.ChatID) {
+		t.Fatal("chats.json still lists the deleted chat")
+	}
+	if _, err := f.svc.Chat(context.Background(), ChatRequest{ChatID: res.ChatID, Message: "hi"}); !errors.Is(err, ErrUnknownChat) {
+		t.Fatalf("continuing a deleted chat: %v", err)
+	}
+}
+
+func TestDeleteChatRefusesOwnersChat(t *testing.T) {
+	f := newFixture(t, fastTiming())
+	err := f.svc.DeleteChat(context.Background(), "123e4567-e89b-42d3-a456-426614174000")
+	if !errors.Is(err, ErrUnknownChat) {
+		t.Fatalf("err = %v", err)
+	}
+	if got := f.srv.Deleted(); len(got) != 0 {
+		t.Fatalf("deleted %v", got)
+	}
+}
+
+func TestDeleteChatWaitsForApproval(t *testing.T) {
+	f := newFixture(t, fastTiming())
+	res, err := f.svc.Chat(context.Background(), ChatRequest{Message: "[fake:approval]"})
+	if err != nil || res.Status != "needs_approval" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if err := f.svc.DeleteChat(context.Background(), res.ChatID); !errors.Is(err, ErrAwaitingApproval) {
+		t.Fatalf("err = %v", err)
+	}
+}

@@ -28,7 +28,7 @@ import (
 	"github.com/dtthaison/muse-mcp/internal/voices"
 )
 
-const version = "0.7.0"
+const version = "0.8.0"
 
 func main() {
 	os.Exit(run())
@@ -69,6 +69,7 @@ func run() int {
 		Interactive: fi != nil && fi.Mode()&os.ModeCharDevice != 0,
 		Library:     lib,
 		Voices:      cat,
+		Chats:       chats.Load(paths.Chats),
 		Muse:        func() (cli.Service, func(), error) { return startMuse(paths, log) },
 		Serve:       func(ctx context.Context) error { return serve(ctx, paths, log, lib, cat) },
 		Claude:      runClaude,
@@ -118,11 +119,11 @@ func serve(ctx context.Context, paths config.Paths, log *slog.Logger, lib *libra
 	switch {
 	case errors.Is(err, browser.ErrLocked):
 		log.Warn("profile locked by another muse-mcp")
-		svc = unavailable{err}
+		svc = unavailable{err, chats.Load(paths.Chats)}
 	case err != nil:
 		return err
 	case findErr != nil:
-		svc = unavailable{findErr}
+		svc = unavailable{findErr, chats.Load(paths.Chats)}
 	default:
 		defer br.Close()
 		s := muse.New(muse.Options{BaseURL: "https://muse.ai", Browser: br, Chats: chats.Load(paths.Chats),
@@ -143,8 +144,11 @@ func serve(ctx context.Context, paths config.Paths, log *slog.Logger, lib *libra
 
 // unavailable answers every muse call with the reason muse can't be used
 // (another session holds the profile, or Chrome is missing). Saved references
-// still work.
-type unavailable struct{ err error }
+// and the list of chats still work.
+type unavailable struct {
+	err   error
+	chats *chats.Registry
+}
 
 func (u unavailable) GenerateImage(context.Context, muse.ImageRequest) (muse.Result, error) {
 	return muse.Result{}, u.err
@@ -158,3 +162,5 @@ func (u unavailable) Decide(context.Context, string, string, bool) (muse.Result,
 func (u unavailable) Status(context.Context) (muse.StatusInfo, error) {
 	return muse.StatusInfo{}, u.err
 }
+func (u unavailable) DeleteChat(context.Context, string) error { return u.err }
+func (u unavailable) ListChats() []chats.Chat                  { return u.chats.List() }

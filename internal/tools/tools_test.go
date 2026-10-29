@@ -11,18 +11,30 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/dtthaison/muse-mcp/internal/chats"
 	"github.com/dtthaison/muse-mcp/internal/library"
 	"github.com/dtthaison/muse-mcp/internal/muse"
 	"github.com/dtthaison/muse-mcp/internal/voices"
 )
 
 type fakeService struct {
-	images []muse.ImageRequest
-	chats  []muse.ChatRequest
-	err    error
+	images  []muse.ImageRequest
+	chats   []muse.ChatRequest
+	deleted []string
+	err     error
+}
+
+func (f *fakeService) DeleteChat(_ context.Context, id string) error {
+	f.deleted = append(f.deleted, id)
+	return f.err
+}
+
+func (f *fakeService) ListChats() []chats.Chat {
+	return []chats.Chat{{ID: "c1", Created: time.Date(2026, 10, 29, 5, 0, 0, 0, time.UTC)}}
 }
 
 func (f *fakeService) GenerateImage(_ context.Context, r muse.ImageRequest) (muse.Result, error) {
@@ -107,7 +119,7 @@ func TestListsTools(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	want := "muse_chat,muse_decide_approval,muse_delete_reference,muse_generate_image,muse_generate_speech,muse_generate_video,muse_list_references,muse_list_voices,muse_save_reference,muse_status"
+	want := "muse_chat,muse_decide_approval,muse_delete_chat,muse_delete_reference,muse_generate_image,muse_generate_speech,muse_generate_video,muse_list_chats,muse_list_references,muse_list_voices,muse_save_reference,muse_status"
 	if strings.Join(names, ",") != want {
 		t.Fatalf("tools %v", names)
 	}
@@ -343,5 +355,25 @@ func TestListVoices(t *testing.T) {
 	}
 	if res.IsError || json.Unmarshal([]byte(text), &out) != nil || out.Matched != 1 || out.Voices[0].Name != "Helio" {
 		t.Fatalf("isError=%v text=%q", res.IsError, text)
+	}
+}
+
+func TestDeleteChat(t *testing.T) {
+	svc, _, cs := setup(t)
+	res, text := call(t, cs, "muse_delete_chat", map[string]any{"chat_id": "c1"})
+	if res.IsError || len(svc.deleted) != 1 || svc.deleted[0] != "c1" || !strings.Contains(text, `"deleted":"c1"`) {
+		t.Fatalf("%v %v %s", res.IsError, svc.deleted, text)
+	}
+	svc.err = muse.ErrUnknownChat
+	if res, text := call(t, cs, "muse_delete_chat", map[string]any{"chat_id": "other"}); !res.IsError || !strings.Contains(text, "only continues or deletes") {
+		t.Fatalf("%v %s", res.IsError, text)
+	}
+}
+
+func TestListChats(t *testing.T) {
+	_, _, cs := setup(t)
+	res, text := call(t, cs, "muse_list_chats", map[string]any{})
+	if res.IsError || !strings.Contains(text, `"id":"c1"`) || !strings.Contains(text, "2026-10-29T05:00:00Z") {
+		t.Fatalf("%v %s", res.IsError, text)
 	}
 }

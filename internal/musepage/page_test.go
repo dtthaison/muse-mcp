@@ -312,3 +312,51 @@ func TestVoiceClipsDownloadedSeparately(t *testing.T) {
 		}
 	}
 }
+
+// startChat sends a message so the fake page moves to /thread/<id>.
+func startChat(t *testing.T, ctx context.Context) string {
+	t.Helper()
+	if err := Send(ctx, "[fake:chat]"); err != nil {
+		t.Fatal(err)
+	}
+	s := until(t, ctx, "reply", func(s State) bool { return !s.Busy && lastText(s) == "Hello from fake muse." })
+	id, ok := ThreadID(s.URL)
+	if !ok {
+		t.Fatalf("no chat id in %s", s.URL)
+	}
+	return id
+}
+
+func TestDeleteOpenChatConfirms(t *testing.T) {
+	ctx, srv := openChat(t)
+	id := startChat(t, ctx)
+	if err := DeleteOpenChat(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if got := srv.Deleted(); len(got) != 1 || got[0] != id {
+		t.Fatalf("deleted %v, want [%s]", got, id)
+	}
+}
+
+func TestDeleteOpenChatWithoutConfirmation(t *testing.T) {
+	ctx, srv := openChat(t)
+	srv.SetDeleteConfirm(false)
+	id := startChat(t, ctx)
+	if err := DeleteOpenChat(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if got := srv.Deleted(); len(got) != 1 || got[0] != id {
+		t.Fatalf("deleted %v, want [%s]", got, id)
+	}
+}
+
+func TestDeleteRefusesAnotherChat(t *testing.T) {
+	ctx, srv := openChat(t)
+	startChat(t, ctx)
+	if err := DeleteOpenChat(ctx, "123e4567-e89b-42d3-a456-426614174000"); err == nil {
+		t.Fatal("deleted while a different chat was open")
+	}
+	if got := srv.Deleted(); len(got) != 0 {
+		t.Fatalf("deleted %v", got)
+	}
+}

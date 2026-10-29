@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestAddPersists(t *testing.T) {
@@ -49,5 +50,39 @@ func TestUnknownID(t *testing.T) {
 	}
 	if r.Count() != 1 {
 		t.Fatalf("count %d", r.Count())
+	}
+}
+
+func TestRemovePersists(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "chats.json")
+	r := Load(path)
+	for _, id := range []string{"a", "b"} {
+		if err := r.Add(id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.Remove("a"); err != nil {
+		t.Fatal(err)
+	}
+	re := Load(path)
+	if re.Known("a") || !re.Known("b") || re.Count() != 1 {
+		t.Fatalf("after remove: a=%v b=%v count=%d", re.Known("a"), re.Known("b"), re.Count())
+	}
+	if err := r.Remove("missing"); err != nil {
+		t.Fatalf("removing an unknown chat: %v", err)
+	}
+}
+
+func TestListOldestFirst(t *testing.T) {
+	r := Load(filepath.Join(t.TempDir(), "chats.json"))
+	for _, id := range []string{"first", "second"} {
+		if err := r.Add(id); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	got := r.List()
+	if len(got) != 2 || got[0].ID != "first" || got[1].ID != "second" || got[0].Created.IsZero() {
+		t.Fatalf("list %+v", got)
 	}
 }

@@ -143,6 +143,16 @@ are proven against the live site and are the best reference for the page logic.
   muse-mcp adds `edit_image` (attached first, "Edit image 1. Change only:
   …"), `keep`, `reference_roles` and `count` (1 to 4) as prompt wording,
   and the muse skill's image guide covers the rest.
+- **Deleting a chat:** the chat switcher opens the side-chats panel. Its
+  rows (`hatch-thread-row`) carry no chat ID and list only some chats, but
+  the open chat's row has `aria-current="page"`. That row's "More thread
+  actions" button only shows while the mouse is over the row and opens Pin,
+  Rename, Archive and Delete; it needs real mouse events. A message's "More
+  options" menu also has a Delete, for that message only. What muse does
+  after Delete (a confirmation dialog or not, where it goes) wasn't checked
+  live, so muse-mcp clicks a confirm button if a dialog shows one and counts
+  the chat as deleted once muse leaves it or the open panel stops listing
+  it. muse-mcp deletes only chats in chats.json, and only when asked.
 
 ## 4. How it works
 

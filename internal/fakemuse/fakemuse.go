@@ -3,9 +3,12 @@
 package fakemuse
 
 import (
+	"bytes"
 	_ "embed"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 )
 
@@ -25,11 +28,22 @@ const loginPage = `<!doctype html><html><body><h1>Muse</h1><p>Log in or create a
 type Server struct {
 	*httptest.Server
 	loggedOut atomic.Bool
+	noConfirm atomic.Bool
+
+	mu      sync.Mutex
+	deleted []string
 }
 
 func New() *Server {
 	s := &Server{}
 	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/__deleted" {
+			id, _ := io.ReadAll(r.Body)
+			s.mu.Lock()
+			s.deleted = append(s.deleted, string(id))
+			s.mu.Unlock()
+			return
+		}
 		if r.URL.Path == "/__loggedin" {
 			if s.loggedOut.Load() {
 				w.Write([]byte("no"))
@@ -43,9 +57,24 @@ func New() *Server {
 			w.Write([]byte(loginPage))
 			return
 		}
+		if s.noConfirm.Load() {
+			w.Write(bytes.Replace(page, []byte("const deleteConfirm = true;"), []byte("const deleteConfirm = false;"), 1))
+			return
+		}
 		w.Write(page)
 	}))
 	return s
+}
+
+// SetDeleteConfirm sets whether Delete in a chat's menu asks for confirmation
+// first (it does by default).
+func (s *Server) SetDeleteConfirm(v bool) { s.noConfirm.Store(!v) }
+
+// Deleted lists the chat IDs deleted through the page, in order.
+func (s *Server) Deleted() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.deleted...)
 }
 
 // SetLoggedOut makes every page show muse's login screen instead of the chat.
