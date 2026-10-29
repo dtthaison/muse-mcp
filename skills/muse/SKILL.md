@@ -1,6 +1,6 @@
 ---
 name: muse
-description: Use when making an image, product photo, poster, illustration, character or scene picture, voice clip, voiceover, narration, announcement or text-to-speech with muse (muse_generate_image, muse_save_reference, muse_generate_speech, muse_list_voices, or the muse-mcp command line), in any language, especially Vietnamese, English or German.
+description: Use when making an image, product photo, poster, illustration, character or scene picture, video, product clip, reel or animation, voice clip, voiceover, narration, announcement or text-to-speech with muse (muse_generate_image, muse_generate_video, muse_save_reference, muse_generate_speech, muse_list_voices, or the muse-mcp command line), in any language, especially Vietnamese, English or German.
 ---
 
 # muse
@@ -10,6 +10,7 @@ before the first call:
 
 - Images, posters, product photos, characters and scenes
   (`muse_generate_image`, `muse_save_reference`): [image.md](image.md)
+- Videos and product clips (`muse_generate_video`): [video.md](video.md)
 - Speech clips (`muse_generate_speech`, `muse_list_voices`): [speech.md](speech.md)
 
 ## Every request

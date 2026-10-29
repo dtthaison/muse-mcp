@@ -31,8 +31,8 @@ muse-mcp login     # log in to muse.ai once, in the Chrome window that opens
 ```
 
 Restart Claude Code and the muse tools are there. `install` also copies the
-`muse` skill (`SKILL.md`, `image.md`, `speech.md`), which teaches Claude how to
-write image prompts and speech scripts for muse, into `~/.claude/skills` (or
+`muse` skill (`SKILL.md`, `image.md`, `video.md`, `speech.md`), which teaches
+Claude how to write image and video prompts and speech scripts for muse, into `~/.claude/skills` (or
 `./.claude/skills` with `--scope project` or `local`). It replaces the older
 `muse-voice` skill. `muse-mcp uninstall` removes both again (your login and saved
 references stay in `~/.muse-mcp`). Run `install` again after upgrading to get
@@ -124,8 +124,15 @@ that session, or quit it first. `refs` and `chats` (the list) always work.
 
 ## Video (experimental)
 
-`muse_generate_video` and `muse-mcp video` are under testing. muse blocks AI
-video for some accounts and regions. When it does, it may make a substitute
+`muse_generate_video` and `muse-mcp video` are under testing. muse makes one
+clip of about 10 seconds per request. Its video tool has no length, ratio,
+resolution, audio, negative-prompt, seed or style setting (ratio and style
+are prompt words), and images guide the clip without being an exact first
+frame. Give each reference image a role (`reference_roles`, `--role`) and
+say what must not change (`keep`, `--keep`). Add captions, prices and music
+in an editor afterwards. The `muse` skill's `video.md` has the prompt rules.
+
+muse blocks AI video for some accounts and regions. When it does, it may make a substitute
 itself (for example an animated still) and say so in the reply, or answer with
 text only, in which case the call fails with muse's reply. Videos are saved
 as muse sends them; if that is a `.webm` and you asked for `.mp4`, the file

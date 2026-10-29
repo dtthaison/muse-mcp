@@ -161,13 +161,39 @@ func TestWaitChatDoneWhenStable(t *testing.T) {
 	}
 }
 
-func TestWaitChatForceDoneAfterStableBusyPolls(t *testing.T) {
+// muse can post a short message ("Checking the exact tool parameters…") and
+// keep working with it unchanged for a long time; the reply isn't done while
+// muse shows its Stop button.
+func TestWaitChatKeepsWaitingBehindInterimMessage(t *testing.T) {
+	tm := waitTiming()
+	w := NewChatWait(musepage.State{}, tm, t0)
+	interim := musepage.State{Busy: true, AgentTexts: []string{"Checking the exact tool parameters."}}
+	for s := 0; s <= 90; s += 2 {
+		if got := w.Step(interim, t0.Add(time.Duration(s)*time.Second)); got != Continue {
+			t.Fatalf("busy behind an interim message at %ds: %v", s, got)
+		}
+	}
+	answer := musepage.State{AgentTexts: []string{"Checking the exact tool parameters.", "Here is the list."}}
+	w.Step(answer, t0.Add(92*time.Second))
+	if got := w.Step(answer, t0.Add(92*time.Second+tm.ChatStable)); got != Done {
+		t.Fatalf("after the answer: %v", got)
+	}
+	if got := w.Reply(answer); got != "Checking the exact tool parameters.\n\nHere is the list." {
+		t.Fatalf("reply %q", got)
+	}
+}
+
+// A Stop button that never goes away doesn't hold the reply until ChatMax.
+func TestWaitChatDoneWhenStuckBusy(t *testing.T) {
 	tm := waitTiming()
 	w := NewChatWait(musepage.State{}, tm, t0)
 	stuck := musepage.State{Busy: true, AgentTexts: []string{"Done."}}
-	v := steps(w, repeat(stuck, tm.ChatForcePolls+1)...)
-	if v[tm.ChatForcePolls-1] != Continue || last(v) != Done {
-		t.Fatalf("verdicts %v", v)
+	w.Step(stuck, t0)
+	if got := w.Step(stuck, t0.Add(tm.ChatStuck-time.Second)); got != Continue {
+		t.Fatalf("before ChatStuck: %v", got)
+	}
+	if got := w.Step(stuck, t0.Add(tm.ChatStuck)); got != Done {
+		t.Fatalf("at ChatStuck: %v", got)
 	}
 }
 
@@ -221,7 +247,7 @@ func TestDefaultTiming(t *testing.T) {
 	want := Timing{Poll: 1500 * time.Millisecond, Ready: 45 * time.Second, ImageTimeout: 4 * time.Minute,
 		ImageMax: 10 * time.Minute, ImageSettle: 3 * time.Second, TextOnlyGrace: 10 * time.Second,
 		ChatTimeout: 5 * time.Minute, ChatMax: 10 * time.Minute, ChatStable: 3 * time.Second,
-		ChatForcePolls: 12, ApprovalTimeout: 10 * time.Minute, Unresponsive: 20 * time.Second, TitleWait: 10 * time.Second}
+		ChatStuck: 2 * time.Minute, ApprovalTimeout: 10 * time.Minute, Unresponsive: 20 * time.Second, TitleWait: 10 * time.Second}
 	if d != want {
 		t.Fatalf("got %+v", d)
 	}
