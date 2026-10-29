@@ -339,10 +339,27 @@ func TestStatusBeforeChromeStarts(t *testing.T) {
 	}
 }
 
+func TestImageEdit(t *testing.T) {
+	h := newHarness(t)
+	dir := t.TempDir()
+	photo, mood := pngFile(t, dir, "bag.png"), pngFile(t, dir, "mood.png")
+	code := h.run("", true, "image", "-o", "bag.png", "--edit", photo, "--change", "a cream background",
+		"--keep", "the stitches", "--ref", mood, "--role", "lighting mood only", "--count", "2")
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, h.errOut.String())
+	}
+	got := h.svc.images[0].Text
+	for _, want := range []string{"Image 1 is the photo to edit.", "Image 2 is lighting mood only.", "Keep exactly: the stitches.", "Make 2 separate versions"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in:\n%s", want, got)
+		}
+	}
+}
+
 func TestVoice(t *testing.T) {
 	h := newHarness(t)
 	h.svc.result.Audio = []output.Saved{{Path: "/w/c1-Hello.mp3", Bytes: 16 << 10}}
-	if code := h.run("", true, "voice", "-o", "clips", "--voice", "Helio", "--speed", "85", "Xin chào", "bạn"); code != 0 {
+	if code := h.run("", true, "speech", "-o", "clips", "--voice", "Helio", "--speed", "85", "Xin chào", "bạn"); code != 0 {
 		t.Fatalf("code=%d stderr=%q", code, h.errOut.String())
 	}
 	got := h.svc.images[0]
@@ -356,10 +373,10 @@ func TestVoice(t *testing.T) {
 
 func TestVoiceDefaultsToCurrentFolder(t *testing.T) {
 	h := newHarness(t)
-	if code := h.run("", true, "voice", "Xin chào"); code != 0 || h.svc.images[0].OutputPath != "." {
+	if code := h.run("", true, "speech", "Xin chào"); code != 0 || h.svc.images[0].OutputPath != "." {
 		t.Fatalf("code=%d stderr=%q request %+v", code, h.errOut.String(), h.svc.images)
 	}
-	if code := h.run("", true, "voice", "-o", "hi.mp3", "Xin chào"); code != 1 || !strings.Contains(h.errOut.String(), "folder") {
+	if code := h.run("", true, "speech", "-o", "hi.mp3", "Xin chào"); code != 1 || !strings.Contains(h.errOut.String(), "folder") {
 		t.Fatalf("file name: code=%d stderr=%q", code, h.errOut.String())
 	}
 }
@@ -405,18 +422,18 @@ func TestVoicesAllAndAccents(t *testing.T) {
 
 func TestVoiceDirectionAndWarnings(t *testing.T) {
 	h := newHarness(t)
-	if code := h.run("", true, "voice", "--language", "Vietnamese (vi-VN)", "--speed", "120",
+	if code := h.run("", true, "speech", "--language", "Vietnamese (vi-VN)", "--speed", "120",
 		"Xin chào các bạn"); code != 0 {
 		t.Fatalf("code=%d stderr=%q", code, h.errOut.String())
 	}
 	if got := h.svc.images[0].Text; !strings.Contains(got, "Language: Vietnamese (vi-VN)") || !strings.Contains(got, "Speed: 120 ") {
 		t.Fatalf("text %q", got)
 	}
-	if code := h.run("", true, "voice", "Giá 199.000đ"); code != 1 || len(h.svc.images) != 1 ||
+	if code := h.run("", true, "speech", "Giá 199.000đ"); code != 1 || len(h.svc.images) != 1 ||
 		!strings.Contains(h.errOut.String(), "digits") || !strings.Contains(h.errOut.String(), "--force") {
 		t.Fatalf("code=%d calls=%d stderr=%q", code, len(h.svc.images), h.errOut.String())
 	}
-	if code := h.run("", true, "voice", "--force", "Giá 199.000đ"); code != 0 || len(h.svc.images) != 2 {
+	if code := h.run("", true, "speech", "--force", "Giá 199.000đ"); code != 0 || len(h.svc.images) != 2 {
 		t.Fatalf("--force: code=%d stderr=%q", code, h.errOut.String())
 	}
 }
@@ -436,40 +453,52 @@ func TestInstallIgnoresNothingToRemove(t *testing.T) {
 
 func TestInstallCopiesSkills(t *testing.T) {
 	h := newHarness(t)
-	want, err := fs.ReadFile(skills.FS, "muse-voice/SKILL.md")
-	if err != nil {
-		t.Fatal(err)
-	}
-	userSkill := filepath.Join(h.home, ".claude", "skills", "muse-voice", "SKILL.md")
-	projSkill := filepath.Join(h.dir, ".claude", "skills", "muse-voice", "SKILL.md")
+	skillDir := filepath.Join(h.home, ".claude", "skills", "muse")
+	projDir := filepath.Join(h.dir, ".claude", "skills", "muse")
+	// An older muse-mcp installed the voice skill as muse-voice.
+	old := filepath.Join(h.home, ".claude", "skills", "muse-voice", "SKILL.md")
+	os.MkdirAll(filepath.Dir(old), 0o755)
+	os.WriteFile(old, []byte("old"), 0o644)
+
 	if code := h.run("", true, "install"); code != 0 {
 		t.Fatalf("code=%d stderr=%q", code, h.errOut.String())
 	}
-	if got, err := os.ReadFile(userSkill); err != nil || !bytes.Equal(got, want) {
-		t.Fatalf("user skill: %v", err)
+	for _, f := range []string{"SKILL.md", "speech.md", "image.md"} {
+		want, err := fs.ReadFile(skills.FS, "muse/"+f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, err := os.ReadFile(filepath.Join(skillDir, f)); err != nil || !bytes.Equal(got, want) {
+			t.Fatalf("%s: %v", f, err)
+		}
 	}
-	if !strings.Contains(h.out.String(), "muse-voice") {
+	if _, err := os.Stat(filepath.Dir(old)); !os.IsNotExist(err) {
+		t.Fatalf("old muse-voice skill still there: %v", err)
+	}
+	if !strings.Contains(h.out.String(), "skill muse") {
 		t.Fatalf("stdout %q", h.out.String())
 	}
 	if code := h.run("", true, "install", "--scope", "project"); code != 0 {
 		t.Fatalf("code=%d", code)
 	}
-	if _, err := os.Stat(projSkill); err != nil {
+	if _, err := os.Stat(filepath.Join(projDir, "SKILL.md")); err != nil {
 		t.Fatal(err)
 	}
 	// Uninstall removes only what install wrote.
-	extra := filepath.Join(filepath.Dir(userSkill), "notes.md")
+	extra := filepath.Join(skillDir, "notes.md")
 	os.WriteFile(extra, []byte("mine"), 0o600)
 	if code := h.run("", true, "uninstall"); code != 0 {
 		t.Fatalf("code=%d", code)
 	}
-	if _, err := os.Stat(userSkill); !os.IsNotExist(err) {
-		t.Fatalf("user skill still there: %v", err)
+	for _, f := range []string{"SKILL.md", "speech.md", "image.md"} {
+		if _, err := os.Stat(filepath.Join(skillDir, f)); !os.IsNotExist(err) {
+			t.Fatalf("%s still there: %v", f, err)
+		}
 	}
 	if _, err := os.Stat(extra); err != nil {
 		t.Fatalf("uninstall removed the owner's file: %v", err)
 	}
-	if _, err := os.Stat(projSkill); err != nil {
+	if _, err := os.Stat(filepath.Join(projDir, "SKILL.md")); err != nil {
 		t.Fatalf("project skill removed by a user-scope uninstall: %v", err)
 	}
 }

@@ -69,11 +69,15 @@ Usage:
       --change TEXT        change only this, keep everything else
       --character NAME     saved character to attach (repeatable)
       --scene NAME         saved scene to attach
+      --edit FILE          a photo to edit (with --change), e.g. the real product
+      --keep TEXT          what must stay exactly the same
       --ref FILE           extra reference image (repeatable)
+      --role TEXT          what the matching --ref is for (repeatable, same order)
       --ref-notes TEXT     what the extra references are for
-      --aspect RATIO       e.g. 16:9
+      --aspect RATIO       1:1, 4:5, 9:16, 16:9 (a request to muse, not a fixed size)
+      --count N            image only: 1 to 4 separate versions
 
-  muse-mcp voice [-o DIR] [--voice NAME] [--language L] [--speed 1-200] [--force] TEXT
+  muse-mcp speech [-o DIR] [--voice NAME] [--language L] [--speed 1-200] [--force] TEXT
                                    (experimental; saves DIR/<chat id>-<chat title>.mp3)
   muse-mcp voices [--gender G] [--accent A] [--tone T] [--limit N | --all] [WORDS]
   muse-mcp voices accents          how many voices each accent has
@@ -120,8 +124,8 @@ func Run(ctx context.Context, args []string, env Env) int {
 		return r.withMuse(func(svc Service) int { return r.status(ctx, svc) })
 	case "image", "video":
 		return r.generate(ctx, cmd, rest)
-	case "voice":
-		return r.voice(ctx, rest)
+	case "speech":
+		return r.speech(ctx, rest)
 	case "voices":
 		return r.voices(rest)
 	case "chat":
@@ -239,23 +243,33 @@ func (r *runner) install(ctx context.Context, cmd string, args []string) int {
 	return exitOK
 }
 
-// installSkills writes every embedded skill into dir, replacing older copies.
+// installSkills writes every embedded skill into dir, replacing older copies,
+// and removes skills older versions installed.
 func installSkills(dir string) ([]string, error) {
+	if err := removeSkillFiles(dir, skills.Retired, func(string) ([]string, error) { return []string{"SKILL.md"}, nil }); err != nil {
+		return nil, err
+	}
 	entries, err := fs.ReadDir(skills.FS, ".")
 	if err != nil {
 		return nil, err
 	}
 	var names []string
 	for _, e := range entries {
-		b, err := fs.ReadFile(skills.FS, e.Name()+"/SKILL.md")
+		files, err := skillFiles(e.Name())
 		if err != nil {
 			return nil, err
 		}
 		if err := os.MkdirAll(filepath.Join(dir, e.Name()), 0o755); err != nil {
 			return nil, err
 		}
-		if err := os.WriteFile(filepath.Join(dir, e.Name(), "SKILL.md"), b, 0o644); err != nil {
-			return nil, err
+		for _, f := range files {
+			b, err := fs.ReadFile(skills.FS, e.Name()+"/"+f)
+			if err != nil {
+				return nil, err
+			}
+			if err := os.WriteFile(filepath.Join(dir, e.Name(), f), b, 0o644); err != nil {
+				return nil, err
+			}
 		}
 		names = append(names, e.Name())
 	}
@@ -269,11 +283,40 @@ func removeSkills(dir string) error {
 	if err != nil {
 		return err
 	}
+	var names []string
 	for _, e := range entries {
-		if err := os.Remove(filepath.Join(dir, e.Name(), "SKILL.md")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		names = append(names, e.Name())
+	}
+	if err := removeSkillFiles(dir, names, skillFiles); err != nil {
+		return err
+	}
+	return removeSkillFiles(dir, skills.Retired, func(string) ([]string, error) { return []string{"SKILL.md"}, nil })
+}
+
+func skillFiles(name string) ([]string, error) {
+	entries, err := fs.ReadDir(skills.FS, name)
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, e := range entries {
+		files = append(files, e.Name())
+	}
+	return files, nil
+}
+
+func removeSkillFiles(dir string, names []string, files func(string) ([]string, error)) error {
+	for _, name := range names {
+		list, err := files(name)
+		if err != nil {
 			return err
 		}
-		os.Remove(filepath.Join(dir, e.Name())) // fails while not empty
+		for _, f := range list {
+			if err := os.Remove(filepath.Join(dir, name, f)); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+		}
+		os.Remove(filepath.Join(dir, name)) // fails while not empty
 	}
 	return nil
 }
@@ -304,14 +347,18 @@ func (r *runner) status(ctx context.Context, svc Service) int {
 func (r *runner) generate(ctx context.Context, cmd string, args []string) int {
 	fs := r.newFlags(cmd)
 	var a tools.ImageArgs
-	var chars, refs list
+	var chars, refs, roles list
 	fs.StringVar(&a.OutputPath, "o", "", "output file")
 	fs.StringVar(&a.Change, "change", "", "")
 	fs.Var(&chars, "character", "")
 	fs.StringVar(&a.Scene, "scene", "", "")
 	fs.Var(&refs, "ref", "")
+	fs.Var(&roles, "role", "")
 	fs.StringVar(&a.ReferenceNotes, "ref-notes", "", "")
+	fs.StringVar(&a.EditImage, "edit", "", "")
+	fs.StringVar(&a.Keep, "keep", "", "")
 	fs.StringVar(&a.AspectRatio, "aspect", "", "")
+	fs.IntVar(&a.Count, "count", 0, "")
 	asJSON := fs.Bool("json", false, "")
 	rest, err := parse(fs, args)
 	if err != nil {
@@ -320,7 +367,7 @@ func (r *runner) generate(ctx context.Context, cmd string, args []string) int {
 	if a.OutputPath == "" {
 		return r.usageErr("%s needs -o OUTPUT", cmd)
 	}
-	a.Prompt, a.Characters, a.ReferenceImages = strings.Join(rest, " "), chars, refs
+	a.Prompt, a.Characters, a.ReferenceImages, a.ReferenceRoles = strings.Join(rest, " "), chars, refs, roles
 	media := muse.MediaImage
 	if cmd == "video" {
 		media = muse.MediaVideo
@@ -339,8 +386,8 @@ func (r *runner) generate(ctx context.Context, cmd string, args []string) int {
 	})
 }
 
-func (r *runner) voice(ctx context.Context, args []string) int {
-	fs := r.newFlags("voice")
+func (r *runner) speech(ctx context.Context, args []string) int {
+	fs := r.newFlags("speech")
 	var a tools.VoiceArgs
 	fs.StringVar(&a.OutputDir, "o", ".", "output folder")
 	fs.StringVar(&a.Voice, "voice", "", "voice name")

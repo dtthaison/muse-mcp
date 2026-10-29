@@ -102,7 +102,7 @@ are proven against the live site and are the best reference for the page logic.
   list. Some of the consistency may come from memory, not the attachment.
 - Only tested **headful** (a visible window). Headless is untested.
 
-### 3a. Video and voice (checked live later on 2026-10-29)
+### 3a. Video, voice and image tools (checked live later on 2026-10-29)
 
 - **Video:** muse posts a video as a `blob:` `<video>` inside
   `[data-testid="hatch-chat-attachment-presentation-video"]` (1920×1280, 5 s
@@ -129,8 +129,20 @@ are proven against the live site and are the best reference for the page logic.
   different directions (base, "slow pace", Southern dialect, "lively radio
   host") gave byte-identical MP3s; only the speed muse chose changed a
   clip (15.7 s with no direction, 23 to 24 s with any). So muse-mcp sends
-  an explicit speed and no style text, and the muse-voice skill turns a
+  an explicit speed and no style text, and the muse skill's speech guide turns a
   feeling into speed plus the script's wording and punctuation.
+- **What muse's image tool takes** (muse's own answer, same day): an
+  ordered list of text and images, and an output format (png, jpg, webp).
+  No size, aspect-ratio, resolution, style, seed, quality or
+  negative-prompt setting: ratio, style and exclusions are prompt words,
+  and the ratio is a request, not an enforced canvas. At most 4 separate
+  images per request. It edits an uploaded photo, but the output is
+  regenerated, not a pixel edit, so "keep unchanged" is a request. No fixed
+  limit on reference images; each one's role should be stated in words.
+  In-image text is unreliable (Vietnamese tone marks especially). So
+  muse-mcp adds `edit_image` (attached first, "Edit image 1. Change only:
+  …"), `keep`, `reference_roles` and `count` (1 to 4) as prompt wording,
+  and the muse skill's image guide covers the rest.
 
 ## 4. How it works
 

@@ -84,6 +84,76 @@ func TestReferenceNotes(t *testing.T) {
 	contains(t, b.Text, "Image 1 is a reference image. Note: use its colours")
 }
 
+// Editing a real photo: it is attached first as the canvas, and the prompt
+// says what may change and what must stay (muse regenerates, so keep is a
+// request, not a guarantee).
+func TestEditImage(t *testing.T) {
+	dir := t.TempDir()
+	photo := touch(t, dir, "bag.png")
+	b, err := Build(Input{EditImage: photo, Change: "the background to a plain cream studio background",
+		Keep: "the bag's shape, colour, stitch pattern and handles", References: []string{touch(t, dir, "mood.png")},
+		ReferenceRoles: []string{"lighting mood only"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Attachments[0] != photo || len(b.Attachments) != 2 {
+		t.Fatalf("attachments %v", b.Attachments)
+	}
+	contains(t, b.Text, "Image 1 is the photo to edit.")
+	contains(t, b.Text, "Image 2 is lighting mood only.")
+	contains(t, b.Text, "Edit image 1. Change only: the background to a plain cream studio background.")
+	contains(t, b.Text, "Keep exactly: the bag's shape, colour, stitch pattern and handles.")
+	if strings.Contains(b.Text, "Generate a new image") {
+		t.Fatalf("edit worded as a new image:\n%s", b.Text)
+	}
+	if _, err := Build(Input{EditImage: photo, Prompt: "nicer"}); err == nil {
+		t.Fatal("edit without change accepted")
+	}
+	if _, err := Build(Input{EditImage: filepath.Join(dir, "missing.png"), Change: "x"}); err == nil {
+		t.Fatal("missing photo accepted")
+	}
+}
+
+func TestKeepWithChange(t *testing.T) {
+	dir := t.TempDir()
+	fox := library.Ref{Name: "fox", Kind: library.Character, Description: "d", Images: []string{touch(t, dir, "f.png")}}
+	b, err := Build(Input{Change: "asleep", Keep: "the red scarf", Characters: []library.Ref{fox}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contains(t, b.Text, "Keep exactly: the red scarf.")
+}
+
+func TestReferenceRoles(t *testing.T) {
+	dir := t.TempDir()
+	b, err := Build(Input{Prompt: "p", References: []string{touch(t, dir, "a.png"), touch(t, dir, "b.png")},
+		ReferenceRoles: []string{"the product: its shape and colour must stay exact."}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contains(t, b.Text, "Image 1 is the product: its shape and colour must stay exact.\n")
+	contains(t, b.Text, "Image 2 is a reference image.")
+	if _, err := Build(Input{Prompt: "p", ReferenceRoles: []string{"x"}}); err == nil {
+		t.Fatal("more roles than references accepted")
+	}
+}
+
+// muse makes at most 4 separate images per request.
+func TestCount(t *testing.T) {
+	b, err := Build(Input{Prompt: "p", Count: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(b.Text, "\n\nMake 3 separate versions and attach all 3 images here in the chat.") {
+		t.Fatalf("ending:\n%s", b.Text)
+	}
+	for _, bad := range []Input{{Prompt: "p", Count: 5}, {Prompt: "p", Count: -1}, {Prompt: "p", Count: 2, Video: true}} {
+		if _, err := Build(bad); err == nil {
+			t.Fatalf("%+v accepted", bad)
+		}
+	}
+}
+
 func TestAspectRatio(t *testing.T) {
 	b, err := Build(Input{Prompt: "p", AspectRatio: "16:9"})
 	if err != nil {

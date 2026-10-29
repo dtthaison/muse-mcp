@@ -1,9 +1,4 @@
----
-name: muse-voice
-description: Use when making a voice clip, voiceover, narration, podcast intro, announcement or text-to-speech ad with muse (muse_generate_voice, muse_list_voices, or "muse-mcp voice"), in any language, especially Vietnamese, English or German, or when a clip should sound natural, human, calm, excited, sad or any other feeling.
----
-
-# muse voice clips
+# muse speech clips (muse_generate_speech)
 
 muse's voice tool takes four things: a voice, a language, a speed (1 to 200,
 100 is normal) and the script. It has no emotion, style, dialect, pitch or
