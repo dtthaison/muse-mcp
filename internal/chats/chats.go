@@ -53,6 +53,7 @@ func Load(path string) *Registry {
 func (r *Registry) Add(id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.reload()
 	if _, ok := r.ids[id]; ok {
 		return nil
 	}
@@ -60,10 +61,26 @@ func (r *Registry) Add(id string) error {
 	return r.save()
 }
 
+// reload re-reads the file before a write, so chats another muse-mcp process
+// added or removed (the CLI next to a server) aren't overwritten. A file
+// that can't be read keeps what is in memory.
+func (r *Registry) reload() {
+	data, err := os.ReadFile(r.path)
+	var f file
+	if err != nil || json.Unmarshal(data, &f) != nil {
+		return
+	}
+	r.ids = map[string]time.Time{}
+	for _, e := range f.Chats {
+		r.ids[e.ID] = e.Created
+	}
+}
+
 // Remove forgets id (after the chat was deleted) and writes the file.
 func (r *Registry) Remove(id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.reload()
 	if _, ok := r.ids[id]; !ok {
 		return nil
 	}

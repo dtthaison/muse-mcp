@@ -553,3 +553,19 @@ func TestChatsDelete(t *testing.T) {
 		t.Fatalf("no ids: code %d", code)
 	}
 }
+
+func TestChatsForget(t *testing.T) {
+	h := newHarness(t)
+	for _, id := range []string{"aaa", "bbb"} {
+		if err := h.chats.Add(id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if code := h.run("", true, "chats", "forget", "aaa", "zzz"); code != 0 {
+		t.Fatalf("code %d: %s", code, h.errOut.String())
+	}
+	if h.chats.Known("aaa") || !h.chats.Known("bbb") || !strings.Contains(h.out.String(), "Forgot chat aaa") ||
+		!strings.Contains(h.out.String(), "zzz is not in the list") || h.svc.closed {
+		t.Fatalf("out %q closed=%v", h.out.String(), h.svc.closed)
+	}
+}

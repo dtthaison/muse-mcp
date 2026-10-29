@@ -153,6 +153,12 @@ are proven against the live site and are the best reference for the page logic.
   live, so muse-mcp clicks a confirm button if a dialog shows one and counts
   the chat as deleted once muse leaves it or the open panel stops listing
   it. muse-mcp deletes only chats in chats.json, and only when asked.
+- A chat muse can't open (24 test chats from 2026-10-29, probably deleted in
+  muse afterwards) shows "Something went wrong" with "Try again" and
+  `chat-empty-loading`, and no chat switcher. The composer is ready seconds
+  before a chat's messages and switcher are, so the delete waits for the
+  switcher first. muse kept the ID it first put in the URL
+  (`/thread/new` → `/thread/<id>`, watched for 2 minutes).
 
 ## 4. How it works
 

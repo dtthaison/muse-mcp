@@ -41,9 +41,10 @@ const (
 	// aria-current="page"; its "More thread actions" button (Pin, Rename,
 	// Archive, Delete) only shows while the mouse is over the row, so it is
 	// clicked with real mouse events. Rows carry no chat ID.
-	selSidePanel  = `[data-testid="hatch-side-chats-panel-shell"]`
-	selCurrentRow = `[data-testid="hatch-thread-row"][aria-current="page"]`
-	selRowMenu    = `button[aria-label="More thread actions"]`
+	selChatLoading = `[data-testid="chat-empty-loading"]`
+	selSidePanel   = `[data-testid="hatch-side-chats-panel-shell"]`
+	selCurrentRow  = `[data-testid="hatch-thread-row"][aria-current="page"]`
+	selRowMenu     = `button[aria-label="More thread actions"]`
 
 	textLoggedOut = "Log in or create an account"
 )
@@ -62,6 +63,9 @@ var (
 	ErrLoggedOut = errors.New("muse.ai is showing its login page")
 	ErrNotReady  = errors.New("the muse.ai page did not become ready")
 	ErrNoButton  = errors.New("no matching button on the muse approval card; the card was left untouched")
+	// ErrChatUnavailable: muse shows "Something went wrong" instead of the
+	// chat, as it does for a chat that was deleted.
+	ErrChatUnavailable = errors.New(`muse can't open this chat (it shows "Something went wrong"); it may have been deleted in muse already`)
 )
 
 // Image is a result image, video or audio clip muse posted in the chat. An
@@ -371,6 +375,9 @@ func DeleteOpenChat(ctx context.Context, id string) error {
 	if open, _ := ThreadID(st.URL); open != id {
 		return fmt.Errorf("the tab shows %s, not chat %s; nothing was deleted", st.URL, id)
 	}
+	if err := waitChatLoaded(ctx); err != nil {
+		return err
+	}
 	row := fmt.Sprintf(`document.querySelector(%s)`, q(selCurrentRow))
 	if _, err := centre(ctx, row); err != nil {
 		if err := click(ctx, fmt.Sprintf(`document.querySelector(%s)`, q(selChatTitle))); err != nil {
@@ -419,6 +426,30 @@ func DeleteOpenChat(ctx context.Context, id string) error {
 		}
 	}
 	return errors.New("muse did not delete the chat; check it in muse.ai")
+}
+
+// waitChatLoaded waits until the chat switcher shows and the chat has
+// stopped loading. The composer is ready a few seconds before that.
+func waitChatLoaded(ctx context.Context) error {
+	js := fmt.Sprintf(`(() => {
+  if ([...document.querySelectorAll('button')].some(b => b.innerText.trim() === 'Try again')) return 'error';
+  return document.querySelector(%s) && !document.querySelector(%s) ? 'ok' : 'wait';
+})()`, q(selChatTitle), q(selChatLoading))
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		res, err := chromedp.Run(ctx, chromedp.Evaluate[string](js))
+		switch {
+		case err == nil && res == "ok":
+			return nil
+		case err == nil && res == "error":
+			return ErrChatUnavailable
+		case time.Now().After(deadline):
+			return errors.New("the muse chat did not finish loading")
+		}
+		if err := sleep(ctx, 250*time.Millisecond); err != nil {
+			return err
+		}
+	}
 }
 
 // centre scrolls the element el (a JS expression) into view and returns the

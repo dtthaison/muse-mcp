@@ -19,6 +19,7 @@ import (
 	"github.com/dtthaison/muse-mcp/internal/chats"
 	"github.com/dtthaison/muse-mcp/internal/library"
 	"github.com/dtthaison/muse-mcp/internal/muse"
+	"github.com/dtthaison/muse-mcp/internal/musepage"
 	"github.com/dtthaison/muse-mcp/internal/output"
 	"github.com/dtthaison/muse-mcp/internal/tools"
 	"github.com/dtthaison/muse-mcp/internal/voices"
@@ -89,6 +90,7 @@ Usage:
 
   muse-mcp chats                   the chats muse-mcp started (IDs and dates)
   muse-mcp chats delete ID...      delete them in muse (cannot be undone)
+  muse-mcp chats forget ID...      drop them from the list only (muse untouched)
 
   muse-mcp refs list
   muse-mcp refs save NAME --kind character|scene --desc TEXT [--replace] IMAGE...
@@ -576,16 +578,32 @@ func (r *runner) chats(ctx context.Context, args []string) int {
 		}
 		return exitOK
 	}
-	if args[0] != "delete" {
-		return r.usageErr("chats takes no arguments, or delete ID...")
+	if args[0] != "delete" && args[0] != "forget" {
+		return r.usageErr("chats takes no arguments, delete ID... or forget ID...")
 	}
 	ids := args[1:]
 	if len(ids) == 0 {
-		return r.usageErr("chats delete needs at least one chat ID")
+		return r.usageErr("chats " + args[0] + " needs at least one chat ID")
+	}
+	if args[0] == "forget" {
+		for _, id := range ids {
+			if !r.env.Chats.Known(id) {
+				fmt.Fprintf(out, "%s is not in the list\n", id)
+				continue
+			}
+			if err := r.env.Chats.Remove(id); err != nil {
+				return r.fail(err)
+			}
+			fmt.Fprintln(out, "Forgot chat", id, "(muse not touched)")
+		}
+		return exitOK
 	}
 	return r.withMuse(func(svc Service) int {
 		for _, id := range ids {
 			if err := svc.DeleteChat(ctx, id); err != nil {
+				if errors.Is(err, musepage.ErrChatUnavailable) {
+					err = fmt.Errorf("%w. To drop it from muse-mcp's list: muse-mcp chats forget %s", err, id)
+				}
 				return r.fail(fmt.Errorf("chat %s: %w", id, err))
 			}
 			fmt.Fprintln(out, "Deleted chat", id)
