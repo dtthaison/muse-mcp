@@ -45,7 +45,10 @@ The cat, scarf and framing stayed; some snow also landed on the windowsill
 inside. `--keep` is a request to muse, not a guarantee.
 
 **Speech** (`muse-mcp speech --voice NAME --language L --speed 100 "…"`), in
-three languages with voices from the built-in catalog:
+three languages with voices from the built-in catalog.
+**[▶ Listen to the clips](https://dtthaison.github.io/muse-mcp/samples/)**
+(GitHub can't play audio in a README; the links in the table download the
+`.mp3`):
 
 | Clip | Voice | Script |
 |---|---|---|
