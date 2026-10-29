@@ -189,7 +189,10 @@ func TestWaitChatTimeoutExtendsWhileBusyUntilMax(t *testing.T) {
 	if got := w.Step(musepage.State{Busy: true}, t0.Add(tm.ChatTimeout+time.Second)); got != Continue {
 		t.Fatalf("busy past timeout: %v", got)
 	}
-	if got := w.Step(musepage.State{}, t0.Add(tm.ChatTimeout+2*time.Second)); got != TimedOut {
+	if got := w.Step(musepage.State{}, t0.Add(tm.ChatTimeout+2*time.Second)); got != Continue {
+		t.Fatalf("just went idle past timeout: %v", got)
+	}
+	if got := w.Step(musepage.State{}, t0.Add(tm.ChatTimeout+time.Second+2*tm.ChatStable)); got != TimedOut {
 		t.Fatalf("idle past timeout: %v", got)
 	}
 	w2 := NewChatWait(musepage.State{}, tm, t0)
@@ -261,5 +264,41 @@ func TestWaitVoiceDoneOnClip(t *testing.T) {
 	cw := NewChatWait(musepage.State{Audios: []musepage.Image{{Src: "audio:0"}}}, waitTiming(), t0)
 	if n := cw.NewAudios(musepage.State{Audios: []musepage.Image{{Src: "audio:0"}, {Src: "audio:1"}}}); len(n) != 1 || n[0].Src != "audio:1" {
 		t.Fatalf("chat clips %v", n)
+	}
+}
+
+// A job that runs past ImageTimeout still gets its settle time once muse stops
+// (a voice clip that took muse nine minutes timed out the moment it finished).
+func TestWaitLongJobSettlesAfterTimeout(t *testing.T) {
+	tm := waitTiming()
+	late := t0.Add(tm.ImageTimeout + 4*time.Minute)
+	w := NewVoiceWait(musepage.State{}, tm, t0)
+	w.Step(musepage.State{Busy: true}, late)
+	done := musepage.State{AgentTexts: []string{"Your clip is ready"}, Audios: []musepage.Image{{Src: "audio:0"}}}
+	if got := w.Step(done, late.Add(time.Second)); got != Continue {
+		t.Fatalf("just finished: %v", got)
+	}
+	if got := w.Step(done, late.Add(time.Second+tm.ImageSettle)); got != Done {
+		t.Fatalf("settled: %v", got)
+	}
+
+	idle := NewImageWait(musepage.State{}, tm, t0)
+	idle.Step(musepage.State{Busy: true}, late)
+	if got := idle.Step(musepage.State{}, late.Add(time.Second)); got != Continue {
+		t.Fatalf("just went idle: %v", got)
+	}
+	if got := idle.Step(musepage.State{}, late.Add(tm.TextOnlyGrace+tm.ImageSettle)); got != TimedOut {
+		t.Fatalf("idle with nothing: %v", got)
+	}
+
+	cw := NewChatWait(musepage.State{}, tm, t0)
+	cw.Step(musepage.State{Busy: true, AgentTexts: []string{"Work"}}, t0.Add(tm.ChatTimeout+time.Minute))
+	reply := musepage.State{AgentTexts: []string{"Working on it. Done."}}
+	at := t0.Add(tm.ChatTimeout + time.Minute + time.Second)
+	if got := cw.Step(reply, at); got != Continue {
+		t.Fatalf("chat just finished: %v", got)
+	}
+	if got := cw.Step(reply, at.Add(tm.ChatStable)); got != Done {
+		t.Fatalf("chat settled: %v", got)
 	}
 }

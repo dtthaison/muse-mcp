@@ -70,6 +70,16 @@ func (c *idleClock) observe(busy bool, now time.Time) time.Duration {
 	return now.Sub(c.since)
 }
 
+// quietFor is how long muse has not looked busy, counted from start when it
+// never has. The "not busy" timeouts wait this long, so a job that finishes
+// after them still gets its settle time.
+func quietFor(lastBusy, start, now time.Time) time.Duration {
+	if lastBusy.Before(start) {
+		lastBusy = start
+	}
+	return now.Sub(lastBusy)
+}
+
 // ImageWait decides when an image (or video, or voice) request is finished.
 type ImageWait struct {
 	t           Timing
@@ -80,6 +90,7 @@ type ImageWait struct {
 	baseAgents  int // moves past the first reply once nudged
 	lastAgents  int
 	idle        idleClock
+	lastBusy    time.Time
 	nudged      bool
 }
 
@@ -115,6 +126,9 @@ func (w *ImageWait) Step(s musepage.State, now time.Time) Verdict {
 		return NeedsApproval
 	}
 	w.lastAgents = len(s.AgentTexts)
+	if s.Busy {
+		w.lastBusy = now
+	}
 	idleFor := w.idle.observe(s.Busy, now)
 	ready := w.NewMedia(s)
 	if len(ready) > 0 && !s.Busy && idleFor >= w.t.ImageSettle {
@@ -128,7 +142,8 @@ func (w *ImageWait) Step(s musepage.State, now time.Time) Verdict {
 		return Nudge
 	}
 	elapsed := now.Sub(w.start)
-	if elapsed >= w.t.ImageMax || (elapsed >= w.t.ImageTimeout && !s.Busy) {
+	quiet := quietFor(w.lastBusy, w.start, now) >= w.t.TextOnlyGrace+w.t.ImageSettle
+	if elapsed >= w.t.ImageMax || (elapsed >= w.t.ImageTimeout && !s.Busy && quiet) {
 		return TimedOut
 	}
 	return Continue
@@ -164,6 +179,7 @@ type ChatWait struct {
 	lastText    string
 	stableSince time.Time
 	stablePolls int
+	lastBusy    time.Time
 }
 
 func NewChatWait(base musepage.State, t Timing, start time.Time) *ChatWait {
@@ -175,6 +191,9 @@ func NewChatWait(base musepage.State, t Timing, start time.Time) *ChatWait {
 func (w *ChatWait) Step(s musepage.State, now time.Time) Verdict {
 	if s.Approval != nil {
 		return NeedsApproval
+	}
+	if s.Busy {
+		w.lastBusy = now
 	}
 	count, text := len(s.AgentTexts), lastOf(s.AgentTexts)
 	if count != w.lastCount || text != w.lastText {
@@ -191,7 +210,8 @@ func (w *ChatWait) Step(s musepage.State, now time.Time) Verdict {
 		}
 	}
 	elapsed := now.Sub(w.start)
-	if elapsed >= w.t.ChatMax || (elapsed >= w.t.ChatTimeout && !s.Busy) {
+	quiet := quietFor(w.lastBusy, w.start, now) >= 2*w.t.ChatStable
+	if elapsed >= w.t.ChatMax || (elapsed >= w.t.ChatTimeout && !s.Busy && quiet) {
 		return TimedOut
 	}
 	return Continue
