@@ -8,8 +8,18 @@ comes from the voice you pick and how the script is written.
 ## The call
 
 1. **`voice`**: the only way to change how the voice sounds (gender, depth,
-   accent). Search `muse_list_voices` and pick one name. An accent is how a
-   voice sounds, not proof it speaks that language well.
+   accent). muse's catalog is built in (1,202 voices, 35 accents). Each
+   voice has one tone word (Warm, Calm, Bright, Confident, Delighted...)
+   and a description with its pitch ("Deep", "High"). Search it with
+   `muse_list_voices` by `gender`, `accent`, `tone` (matches the tone word)
+   or words, which match name, accent, tone and description (command line:
+   `muse-mcp voices --accent vietnamese --gender female`; `muse-mcp voices
+   accents` lists the accents). Most accents have few voices (Vietnamese 7,
+   German 13): if the tone finds nothing, list gender and accent and pick
+   the closest tone ("warm" → Delighted, Gentle or Friendly). Pick one name
+   and tell the owner why, naming the runner-up if two fit equally. An
+   accent is how a voice sounds, not proof it speaks that language well.
+   Leave `voice` out only if the owner doesn't mind; muse then picks one.
 2. **`language`**: with locale: `Vietnamese (vi-VN)`, `English (en-US)`,
    `German (de-DE)`. One language per clip.
 3. **`speed`**: from the feeling (table below).
