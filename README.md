@@ -53,6 +53,8 @@ three languages with voices from the built-in catalog:
 | [Vietnamese](docs/samples/speech-vi.mp3) (6 s) | Glad Kite | Xin chào! Đây là giọng đọc mẫu, được tạo bằng muse ngay trong Claude Code. Bạn chỉ cần viết lời, chọn giọng, vậy là xong. |
 | [German](docs/samples/speech-de.mp3) (7 s) | Impetuous Glove | Hallo! Diese Sprachprobe kommt von muse, direkt aus Claude Code. Einfach Text schreiben, Stimme wählen, fertig. |
 
+**Video:** no sample yet; see [Video](#video-experimental).
+
 ## Requirements
 
 - macOS or Linux (Windows isn't supported)
@@ -180,6 +182,11 @@ that session, or quit it first. `refs` and `chats` (the list) always work.
 
 ## Video (experimental)
 
+> **Not yet tested end to end; TBD.** muse blocks AI video for the author's
+> account, so no video has been made through muse-mcp yet. The code is
+> covered by offline tests against a fake muse page only. Reports from
+> accounts where muse video works are welcome.
+
 `muse_generate_video` and `muse-mcp video` are under testing. muse makes one
 clip of about 10 seconds per request. Its video tool has no length, ratio,
 resolution, audio, negative-prompt, seed or style setting (ratio and style
@@ -188,8 +195,8 @@ frame. Give each reference image a role (`reference_roles`, `--role`) and
 say what must not change (`keep`, `--keep`). Add captions, prices and music
 in an editor afterwards. The `muse` skill's `video.md` has the prompt rules.
 
-muse blocks AI video for some accounts and regions. When it does, it may make a substitute
-itself (for example an animated still) and say so in the reply, or answer with
+muse blocks AI video for some accounts and regions. When it does, it may make
+a substitute itself (for example an animated still) and say so in the reply, or answer with
 text only, in which case the call fails with muse's reply. Videos are saved
 as muse sends them; if that is a `.webm` and you asked for `.mp4`, the file
 keeps the `.webm` extension.
