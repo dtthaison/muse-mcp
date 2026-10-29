@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -100,9 +102,12 @@ func runClaude(ctx context.Context, args ...string) error {
 	if _, err := exec.LookPath("claude"); err != nil {
 		return fmt.Errorf("the claude command isn't on PATH; run it yourself: claude %v", args)
 	}
-	c := exec.CommandContext(ctx, "claude", args...)
-	c.Stdout, c.Stderr = os.Stdout, os.Stderr
-	return c.Run()
+	// muse-mcp prints its own summary; claude's output only matters when it fails.
+	out, err := exec.CommandContext(ctx, "claude", args...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("claude %s: %w\n%s", strings.Join(args, " "), err, bytes.TrimSpace(out))
+	}
+	return nil
 }
 
 func serve(ctx context.Context, paths config.Paths, log *slog.Logger, lib *library.Store, cat *voices.Catalog) error {

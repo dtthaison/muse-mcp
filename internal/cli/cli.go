@@ -225,6 +225,8 @@ func (r *runner) install(ctx context.Context, cmd string, args []string) int {
 		fmt.Fprintln(r.env.Stdout, "Removed muse and its skills from Claude Code. Your login and saved references in ~/.muse-mcp are kept.")
 		return exitOK
 	}
+	// Replace an earlier install, so install also upgrades; nothing to remove is fine.
+	_ = r.env.Claude(ctx, "mcp", "remove", "-s", *scope, "muse")
 	if err := r.env.Claude(ctx, "mcp", "add", "-s", *scope, "muse", "--", r.env.Exe); err != nil {
 		return r.fail(err)
 	}
@@ -232,7 +234,7 @@ func (r *runner) install(ctx context.Context, cmd string, args []string) int {
 	if err != nil {
 		return r.fail(err)
 	}
-	fmt.Fprintf(r.env.Stdout, "Added muse to Claude Code, and the skills %s in %s.\n", strings.Join(names, ", "), dir)
+	fmt.Fprintf(r.env.Stdout, "Added muse to Claude Code and installed the skill %s in %s.\n", strings.Join(names, ", "), dir)
 	fmt.Fprintln(r.env.Stdout, "Restart Claude Code, then run `muse-mcp login` once if you haven't.")
 	return exitOK
 }

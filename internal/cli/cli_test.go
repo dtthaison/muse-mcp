@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/png"
@@ -66,6 +67,7 @@ type harness struct {
 	claude      [][]string
 	served      bool
 	home, dir   string
+	claudeErr   func(args []string) error
 }
 
 func newHarness(t *testing.T) *harness {
@@ -84,11 +86,17 @@ func (h *harness) run(stdin string, interactive bool, args ...string) int {
 		Muse: func() (Service, func(), error) {
 			return h.svc, func() { h.svc.closed = true }, nil
 		},
-		Serve:  func(context.Context) error { h.served = true; return nil },
-		Claude: func(_ context.Context, args ...string) error { h.claude = append(h.claude, args); return nil },
-		Exe:    "/opt/bin/muse-mcp",
-		Home:   h.home,
-		Dir:    h.dir,
+		Serve: func(context.Context) error { h.served = true; return nil },
+		Claude: func(_ context.Context, args ...string) error {
+			h.claude = append(h.claude, args)
+			if h.claudeErr != nil {
+				return h.claudeErr(args)
+			}
+			return nil
+		},
+		Exe:  "/opt/bin/muse-mcp",
+		Home: h.home,
+		Dir:  h.dir,
 	})
 }
 
@@ -275,7 +283,9 @@ func TestInstallAndUninstall(t *testing.T) {
 		t.Fatalf("code=%d", code)
 	}
 	want := []string{
+		"mcp remove -s user muse", // install replaces an earlier install
 		"mcp add -s user muse -- /opt/bin/muse-mcp",
+		"mcp remove -s project muse",
 		"mcp add -s project muse -- /opt/bin/muse-mcp",
 		"mcp remove -s user muse",
 	}
@@ -398,6 +408,19 @@ func TestVoiceDirectionAndWarnings(t *testing.T) {
 	}
 	if code := h.run("", true, "voice", "-o", "a.mp3", "--force", "Giá 199.000đ"); code != 0 || len(h.svc.images) != 2 {
 		t.Fatalf("--force: code=%d stderr=%q", code, h.errOut.String())
+	}
+}
+
+func TestInstallIgnoresNothingToRemove(t *testing.T) {
+	h := newHarness(t)
+	h.claudeErr = func(args []string) error {
+		if args[1] == "remove" {
+			return errors.New("no MCP server found")
+		}
+		return nil
+	}
+	if code := h.run("", true, "install"); code != 0 || len(h.claude) != 2 {
+		t.Fatalf("code=%d calls=%v stderr=%q", code, h.claude, h.errOut.String())
 	}
 }
 
