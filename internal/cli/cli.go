@@ -98,7 +98,7 @@ Usage:
 
   muse-mcp version
 
-image, video, voice and chat take --json to print the raw result. When muse asks to act
+image, video, speech and chat take --json to print the raw result. When muse asks to act
 on your accounts, you are asked in the terminal; without a terminal nothing is
 approved.
 `
