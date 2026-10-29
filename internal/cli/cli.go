@@ -73,8 +73,8 @@ Usage:
       --ref-notes TEXT     what the extra references are for
       --aspect RATIO       e.g. 16:9
 
-  muse-mcp voice -o OUT.mp3 [--voice NAME] [--language L] [--dialect D] [--use U]
-                 [--style TEXT] [--force] TEXT   (experimental)
+  muse-mcp voice -o OUT.mp3 [--voice NAME] [--language L] [--speed 1-200] [--force] TEXT
+                                   (experimental; 100 is normal speed)
   muse-mcp voices [--gender G] [--accent A] [--tone T] [--limit N | --all] [WORDS]
   muse-mcp voices accents          how many voices each accent has
   muse-mcp voices import FILE.csv   muse's voice catalog (ask muse for it as CSV)
@@ -344,10 +344,8 @@ func (r *runner) voice(ctx context.Context, args []string) int {
 	var a tools.VoiceArgs
 	fs.StringVar(&a.OutputPath, "o", "", "output file")
 	fs.StringVar(&a.Voice, "voice", "", "voice name")
-	fs.StringVar(&a.Style, "style", "", "how to say it: 3 to 5 traits")
 	fs.StringVar(&a.Language, "language", "", "language and locale, e.g. Vietnamese (vi-VN)")
-	fs.StringVar(&a.Dialect, "dialect", "", "one accent or dialect, e.g. Southern Vietnamese (Saigon)")
-	fs.StringVar(&a.UseCase, "use", "", "audience, purpose and length")
+	fs.IntVar(&a.Speed, "speed", 0, "1 to 200, 100 is normal")
 	fs.BoolVar(&a.IgnoreScriptWarnings, "force", false, "send the script despite warnings")
 	asJSON := fs.Bool("json", false, "")
 	rest, err := parse(fs, args)

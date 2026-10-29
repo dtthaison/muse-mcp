@@ -161,20 +161,15 @@ func TestVideoWording(t *testing.T) {
 }
 
 func TestVoice(t *testing.T) {
-	b, err := Voice(VoiceInput{Text: "Xin chào!\nHello.", Voice: "Helio", Language: "Vietnamese (vi-VN)",
-		Dialect: "Southern (Saigon)", UseCase: "30-second shop video", Style: "warm, friendly."})
+	b, err := Voice(VoiceInput{Text: "Xin chào!\nHello.", Voice: "Helio", Language: "Vietnamese (vi-VN)", Speed: 85})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := `Generate a voice clip (text to speech) and attach it here in the chat as a single audio file.
 
 Voice: "Helio" from your voice catalog.
-
-Direction (how to say it; do not read this part aloud):
-- Language: Vietnamese (vi-VN)
-- Dialect: Southern (Saigon)
-- Use: 30-second shop video
-- Style: warm, friendly
+Language: Vietnamese (vi-VN)
+Speed: 85 (your voice tool's speed setting: 1 to 200, 100 is normal)
 
 Script (say exactly this, word for word; add nothing, leave nothing out):
 """
@@ -189,8 +184,14 @@ Hello.
 	}
 	b, _ = Voice(VoiceInput{Text: "hi"})
 	contains(t, b.Text, "Voice: pick one from your voice catalog that suits the script.")
-	if strings.Contains(b.Text, "Direction") {
-		t.Fatalf("empty direction block:\n%s", b.Text)
+	contains(t, b.Text, "Speed: 100 ") // always set, so muse doesn't guess one
+	if strings.Contains(b.Text, "Language:") {
+		t.Fatalf("empty language line:\n%s", b.Text)
+	}
+	for _, bad := range []int{-1, 201} {
+		if _, err := Voice(VoiceInput{Text: "hi", Speed: bad}); err == nil {
+			t.Fatalf("speed %d accepted", bad)
+		}
 	}
 	if _, err := Voice(VoiceInput{Text: "  "}); err == nil {
 		t.Fatal("want error for empty text")

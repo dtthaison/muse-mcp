@@ -121,6 +121,16 @@ are proven against the live site and are the best reference for the page logic.
 - The voice catalog (1,202 voices: name, gender, accent, tone, description)
   is muse's data. muse-mcp doesn't ship it; the owner asks muse for it as a
   CSV and imports it (`muse-mcp voices import`).
+- **What muse's voice tool takes:** a voice, a language code, a speed
+  (1 to 200, default 100) and the script, plus a second voice for dialogue
+  scripts (muse-mcp doesn't use that). No emotion, style, instruction,
+  pitch, volume, SSML or tags (muse's own answer to the owner). A live
+  comparison agreed: one voice reading one Vietnamese script with four
+  different directions (base, "slow pace", Southern dialect, "lively radio
+  host") gave byte-identical MP3s; only the speed muse chose changed a
+  clip (15.7 s with no direction, 23 to 24 s with any). So muse-mcp sends
+  an explicit speed and no style text, and the muse-voice skill turns a
+  feeling into speed plus the script's wording and punctuation.
 
 ## 4. How it works
 

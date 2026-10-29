@@ -263,12 +263,12 @@ func TestGenerateVideo(t *testing.T) {
 func TestGenerateVoice(t *testing.T) {
 	svc, _, cs := setup(t)
 	res, text := call(t, cs, "muse_generate_voice", map[string]any{"output_path": "hi.mp3", "text": "Xin chào các bạn",
-		"voice": "Helio", "language": "Vietnamese (vi-VN)", "dialect": "Southern (Saigon)", "use_case": "shop video", "style": "calm"})
+		"voice": "Helio", "language": "Vietnamese (vi-VN)", "speed": 85})
 	if res.IsError || len(svc.images) != 1 {
 		t.Fatalf("isError=%v text=%q", res.IsError, text)
 	}
 	got := svc.images[0]
-	for _, want := range []string{`Voice: "Helio"`, "- Language: Vietnamese (vi-VN)", "- Dialect: Southern (Saigon)", "- Use: shop video", "- Style: calm", "Xin chào các bạn"} {
+	for _, want := range []string{`Voice: "Helio"`, "Language: Vietnamese (vi-VN)", "Speed: 85 ", "Xin chào các bạn"} {
 		if !strings.Contains(got.Text, want) {
 			t.Fatalf("missing %q in:\n%s", want, got.Text)
 		}

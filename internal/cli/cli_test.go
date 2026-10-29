@@ -342,7 +342,7 @@ func TestStatusBeforeChromeStarts(t *testing.T) {
 func TestVoice(t *testing.T) {
 	h := newHarness(t)
 	h.svc.result.Audio = []output.Saved{{Path: "/w/hi.mp3", Bytes: 16 << 10}}
-	if code := h.run("", true, "voice", "-o", "hi.mp3", "--voice", "Helio", "--style", "calm", "Xin chào", "bạn"); code != 0 {
+	if code := h.run("", true, "voice", "-o", "hi.mp3", "--voice", "Helio", "--speed", "85", "Xin chào", "bạn"); code != 0 {
 		t.Fatalf("code=%d stderr=%q", code, h.errOut.String())
 	}
 	got := h.svc.images[0]
@@ -395,11 +395,11 @@ func TestVoicesAllAndAccents(t *testing.T) {
 
 func TestVoiceDirectionAndWarnings(t *testing.T) {
 	h := newHarness(t)
-	if code := h.run("", true, "voice", "-o", "a.mp3", "--language", "Vietnamese (vi-VN)", "--dialect", "Southern (Saigon)",
-		"--use", "shop video", "Xin chào các bạn"); code != 0 {
+	if code := h.run("", true, "voice", "-o", "a.mp3", "--language", "Vietnamese (vi-VN)", "--speed", "120",
+		"Xin chào các bạn"); code != 0 {
 		t.Fatalf("code=%d stderr=%q", code, h.errOut.String())
 	}
-	if got := h.svc.images[0].Text; !strings.Contains(got, "- Dialect: Southern (Saigon)") || !strings.Contains(got, "- Use: shop video") {
+	if got := h.svc.images[0].Text; !strings.Contains(got, "Language: Vietnamese (vi-VN)") || !strings.Contains(got, "Speed: 120 ") {
 		t.Fatalf("text %q", got)
 	}
 	if code := h.run("", true, "voice", "-o", "a.mp3", "Giá 199.000đ"); code != 1 || len(h.svc.images) != 1 ||

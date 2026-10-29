@@ -110,19 +110,30 @@ keeps the `.webm` extension.
 exact text you give and save it as `.mp3`. Pass a voice name (for example
 `Helio` or `Aria`) or leave it out and muse picks one.
 
-muse-mcp keeps three things apart in what it sends muse: the voice, the
-direction (`language`, `dialect`, `use_case`, and `style` with 3 to 5 traits
-such as "friendly shop owner, warm, clear, conversational pace"), and the
-script, which muse is told to read word for word.
+muse's voice tool takes only a voice, a language and a speed (1 to 200, 100
+is normal). It has no emotion, style, dialect or pitch setting and no tags
+like `[excited]`: the same voice, script and speed give the same clip, whatever
+mood you describe. So a feeling goes into the speed and the way the script is
+written:
+
+| Feeling | Speed | Script |
+|---|---|---|
+| calm | 85 | soft words, commas and full stops for pauses |
+| friendly | 100 | warm, welcoming words |
+| excited | 120 | short sentences, exclamation marks |
+| sad | 80 | slow words, short sentences for long pauses |
+| confident | 100 | short strong sentences, no hesitation words |
 
 ```sh
-muse-mcp voice -o ad.mp3 --voice "Sparkling Whistle" --language "Vietnamese (vi-VN)" \
-  --dialect "Southern (Saigon)" --use "30-second shop video" --style "warm, upbeat, clear" \
-  "Giảm năm mươi phần trăm cho mọi đơn hàng hôm nay."
+muse-mcp voice -o open.mp3 --voice "Sparkling Whistle" --language "Vietnamese (vi-VN)" --speed 120 \
+  "Quán trà sữa Mây khai trương rồi! Mua một tặng một! Ghé quán ngay nhé!"
 ```
 
+muse-mcp always sends a speed (100 if you give none); without one, muse
+picks its own from the wording.
+
 Write the script as it should sound: numbers, prices and dates in words, no
-links, emoji, markdown, stage directions or speaker labels, and Vietnamese
+links, emoji, markdown, tags, stage directions or speaker labels, and Vietnamese
 with full tone marks. muse-mcp checks for these before asking muse and refuses
 a script that has them (no quota used); `ignore_script_warnings` (`--force` on
 the command line) sends it anyway.

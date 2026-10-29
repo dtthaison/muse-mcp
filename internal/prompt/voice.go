@@ -8,16 +8,14 @@ import (
 	"unicode"
 )
 
-// VoiceInput is a text-to-speech request. Following muse's own voice-prompt
-// guide, the message keeps three parts apart: the voice (a catalog setting),
-// the direction (how to say it), and the script (only the words to speak).
+// VoiceInput is a text-to-speech request. muse's voice tool takes only a
+// voice, a language and a speed: it has no emotion, style or tag settings,
+// so a feeling has to be written into the script and the speed.
 type VoiceInput struct {
 	Text     string // the script, said word for word
 	Voice    string // a name from muse's voice catalog, e.g. "Helio"; empty lets muse pick
 	Language string // e.g. "Vietnamese (vi-VN)"
-	Dialect  string // e.g. "Southern (Saigon)"
-	UseCase  string // audience, purpose and length, e.g. "30-second social video for shoppers"
-	Style    string // tone, voice quality and pace, e.g. "warm, friendly, conversational pace"
+	Speed    int    // 1 to 200; 0 means 100, normal
 }
 
 // Voice builds the message for a voice clip. Nothing is attached.
@@ -26,26 +24,24 @@ func Voice(in VoiceInput) (Built, error) {
 	if text == "" {
 		return Built{}, errors.New("give the text to say")
 	}
+	speed := in.Speed
+	if speed == 0 {
+		speed = 100 // say it, or muse picks a speed from the wording
+	}
+	if speed < 1 || speed > 200 {
+		return Built{}, fmt.Errorf("speed %d: use 1 to 200 (100 is normal)", in.Speed)
+	}
 	var b strings.Builder
 	b.WriteString("Generate a voice clip (text to speech) and attach it here in the chat as a single audio file.\n\n")
 	if v := strings.TrimSpace(in.Voice); v != "" {
-		fmt.Fprintf(&b, "Voice: %q from your voice catalog.\n\n", v)
+		fmt.Fprintf(&b, "Voice: %q from your voice catalog.\n", v)
 	} else {
-		b.WriteString("Voice: pick one from your voice catalog that suits the script.\n\n")
+		b.WriteString("Voice: pick one from your voice catalog that suits the script.\n")
 	}
-	var dir []string
-	for _, f := range []struct{ label, value string }{
-		{"Language", in.Language}, {"Dialect", in.Dialect}, {"Use", in.UseCase}, {"Style", in.Style},
-	} {
-		if v := sentence(f.value); v != "" {
-			dir = append(dir, fmt.Sprintf("- %s: %s", f.label, v))
-		}
+	if l := sentence(in.Language); l != "" {
+		fmt.Fprintf(&b, "Language: %s\n", l)
 	}
-	if len(dir) > 0 {
-		b.WriteString("Direction (how to say it; do not read this part aloud):\n")
-		b.WriteString(strings.Join(dir, "\n"))
-		b.WriteString("\n\n")
-	}
+	fmt.Fprintf(&b, "Speed: %d (your voice tool's speed setting: 1 to 200, 100 is normal)\n\n", speed)
 	fmt.Fprintf(&b, "Script (say exactly this, word for word; add nothing, leave nothing out):\n\"\"\"\n%s\n\"\"\"", text)
 	return Built{Text: b.String()}, nil
 }
@@ -79,7 +75,7 @@ func CheckScript(text, language string) []string {
 		w = append(w, "contains emoji: they are skipped or read out as names")
 	}
 	if bracketRE.MatchString(text) {
-		w = append(w, "contains brackets or tags like [whispers] or <break>: they may be read aloud; put directions in style")
+		w = append(w, "contains brackets or tags like [whispers] or <break>: muse has no tags and may read them aloud; express the feeling with wording and speed")
 	}
 	if mdRE.MatchString(text) {
 		w = append(w, "contains markdown: write plain spoken text")
