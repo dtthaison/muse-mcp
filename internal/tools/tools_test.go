@@ -107,7 +107,7 @@ func TestListsTools(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	want := "muse_chat,muse_decide_approval,muse_delete_reference,muse_generate_image,muse_generate_video,muse_generate_voice,muse_list_references,muse_list_voices,muse_save_reference,muse_status"
+	want := "muse_chat,muse_decide_approval,muse_delete_reference,muse_generate_image,muse_generate_speech,muse_generate_video,muse_list_references,muse_list_voices,muse_save_reference,muse_status"
 	if strings.Join(names, ",") != want {
 		t.Fatalf("tools %v", names)
 	}
@@ -171,6 +171,29 @@ func TestGenerateBuildsPrompt(t *testing.T) {
 	var out muse.Result
 	if err := json.Unmarshal([]byte(text), &out); err != nil || out.Status != "done" {
 		t.Fatalf("result text %q (%v)", text, err)
+	}
+}
+
+func TestGenerateEditsPhoto(t *testing.T) {
+	svc, _, cs := setup(t)
+	dir := t.TempDir()
+	photo, mood := pngFile(t, dir, "bag.png"), pngFile(t, dir, "mood.png")
+	res, text := call(t, cs, "muse_generate_image", map[string]any{"output_path": "bag-cream.png", "edit_image": photo,
+		"change": "the background to a plain cream studio background", "keep": "the bag's shape, colour and stitches",
+		"reference_images": []string{mood}, "reference_roles": []string{"lighting mood only"}, "count": 3})
+	if res.IsError {
+		t.Fatal(text)
+	}
+	got := svc.images[0]
+	for _, want := range []string{"Image 1 is the photo to edit.", "Image 2 is lighting mood only.",
+		"Edit image 1. Change only: the background", "Keep exactly: the bag's shape, colour and stitches.",
+		"Make 3 separate versions"} {
+		if !strings.Contains(got.Text, want) {
+			t.Fatalf("missing %q in:\n%s", want, got.Text)
+		}
+	}
+	if len(got.Attachments) != 2 || got.Attachments[0] != photo {
+		t.Fatalf("attachments %v", got.Attachments)
 	}
 }
 
@@ -260,9 +283,9 @@ func TestGenerateVideo(t *testing.T) {
 	}
 }
 
-func TestGenerateVoice(t *testing.T) {
+func TestGenerateSpeech(t *testing.T) {
 	svc, _, cs := setup(t)
-	res, text := call(t, cs, "muse_generate_voice", map[string]any{"output_dir": "clips", "text": "Xin chào các bạn",
+	res, text := call(t, cs, "muse_generate_speech", map[string]any{"output_dir": "clips", "text": "Xin chào các bạn",
 		"voice": "Helio", "language": "Vietnamese (vi-VN)", "speed": 85})
 	if res.IsError || len(svc.images) != 1 {
 		t.Fatalf("isError=%v text=%q", res.IsError, text)
@@ -277,11 +300,11 @@ func TestGenerateVoice(t *testing.T) {
 		t.Fatalf("request %+v", got)
 	}
 	// The file is named after the chat, so a file name is refused.
-	res, text = call(t, cs, "muse_generate_voice", map[string]any{"output_dir": "hi.mp3", "text": "x"})
+	res, text = call(t, cs, "muse_generate_speech", map[string]any{"output_dir": "hi.mp3", "text": "x"})
 	if !res.IsError || !strings.Contains(text, "folder") || len(svc.images) != 1 {
 		t.Fatalf("isError=%v text=%q", res.IsError, text)
 	}
-	if res, text := call(t, cs, "muse_generate_voice", map[string]any{"text": "Xin chào"}); res.IsError || svc.images[1].OutputPath != "." {
+	if res, text := call(t, cs, "muse_generate_speech", map[string]any{"text": "Xin chào"}); res.IsError || svc.images[1].OutputPath != "." {
 		t.Fatalf("default folder: isError=%v text=%q request %+v", res.IsError, text, svc.images[1])
 	}
 }
@@ -289,13 +312,13 @@ func TestGenerateVoice(t *testing.T) {
 func TestVoiceScriptWarningsBlockUntilIgnored(t *testing.T) {
 	svc, _, cs := setup(t)
 	args := map[string]any{"text": "Giá chỉ 199.000đ, xem tại https://shop.vn"}
-	res, text := call(t, cs, "muse_generate_voice", args)
+	res, text := call(t, cs, "muse_generate_speech", args)
 	if !res.IsError || !strings.Contains(text, "digits") || !strings.Contains(text, "link") ||
 		!strings.Contains(text, "ignore_script_warnings") || len(svc.images) != 0 {
 		t.Fatalf("isError=%v text=%q calls=%d", res.IsError, text, len(svc.images))
 	}
 	args["ignore_script_warnings"] = true
-	if res, text := call(t, cs, "muse_generate_voice", args); res.IsError || len(svc.images) != 1 {
+	if res, text := call(t, cs, "muse_generate_speech", args); res.IsError || len(svc.images) != 1 {
 		t.Fatalf("isError=%v text=%q", res.IsError, text)
 	}
 }

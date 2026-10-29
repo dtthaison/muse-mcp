@@ -462,7 +462,7 @@ func (s *Service) runImage(ctx context.Context, id string, t *tab, r *ImageReque
 				case MediaVoice:
 					// OutputPath is a folder; the file is named after the chat.
 					save, into = func(data []byte) (output.Saved, error) {
-						return output.SaveAudioInDir(data, r.OutputPath, output.ChatFileName(id, res.Title, "voice"))
+						return output.SaveAudioInDir(data, r.OutputPath, output.ChatFileName(id, res.Title, "speech"))
 					}, &res.Audio
 				}
 				saved, err := s.download(op, im, save)

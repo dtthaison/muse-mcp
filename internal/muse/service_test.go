@@ -498,7 +498,7 @@ func TestLoginWaitsForOwner(t *testing.T) {
 }
 
 // A voice clip goes into the output folder as <chat id>-<chat title>.mp3.
-func TestGenerateVoiceNamesFileAfterChat(t *testing.T) {
+func TestGenerateSpeechNamesFileAfterChat(t *testing.T) {
 	f := newFixture(t, fastTiming())
 	res, err := f.svc.GenerateImage(context.Background(), ImageRequest{Text: "[fake:voice] hello", Media: MediaVoice,
 		OutputPath: f.out})
@@ -515,16 +515,16 @@ func TestGenerateVoiceNamesFileAfterChat(t *testing.T) {
 	}
 }
 
-// When muse never names the chat, the name falls back to <chat id>-voice.
-func TestGenerateVoiceWithoutTitle(t *testing.T) {
+// When muse never names the chat, the name falls back to <chat id>-speech.
+func TestGenerateSpeechWithoutTitle(t *testing.T) {
 	f := newFixture(t, fastTiming())
 	res, err := f.svc.GenerateImage(context.Background(), ImageRequest{Text: "[fake:voices] hello", Media: MediaVoice,
 		OutputPath: f.out})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Audio) != 2 || res.Audio[0].Path != filepath.Join(f.out, res.ChatID+"-voice.mp3") ||
-		res.Audio[1].Path != filepath.Join(f.out, res.ChatID+"-voice-1.mp3") {
+	if len(res.Audio) != 2 || res.Audio[0].Path != filepath.Join(f.out, res.ChatID+"-speech.mp3") ||
+		res.Audio[1].Path != filepath.Join(f.out, res.ChatID+"-speech-1.mp3") {
 		t.Fatalf("result %+v", res)
 	}
 }

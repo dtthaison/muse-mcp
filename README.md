@@ -31,9 +31,10 @@ muse-mcp login     # log in to muse.ai once, in the Chrome window that opens
 ```
 
 Restart Claude Code and the muse tools are there. `install` also copies the
-`muse-voice` skill, which teaches Claude how to write voice scripts and
-direction, into `~/.claude/skills` (or `./.claude/skills` with `--scope project`
-or `local`). `muse-mcp uninstall` removes both again (your login and saved
+`muse` skill (`SKILL.md`, `image.md`, `speech.md`), which teaches Claude how to
+write image prompts and speech scripts for muse, into `~/.claude/skills` (or
+`./.claude/skills` with `--scope project` or `local`). It replaces the older
+`muse-voice` skill. `muse-mcp uninstall` removes both again (your login and saved
 references stay in `~/.muse-mcp`). Run `install` again after upgrading to get
 the newest skill.
 
@@ -49,7 +50,7 @@ again." The window hides itself once muse.ai shows your chats.
 |---|---|
 | `muse_generate_image` | Makes an image and saves it to `output_path` (`.png`, `.jpg`/`.jpeg` or `.webp`). Takes about a minute. |
 | `muse_generate_video` | **Experimental, under testing.** Makes a short video and saves it to `output_path` (`.mp4` or `.webm`). See [Video](#video-experimental). |
-| `muse_generate_voice` | **Experimental, under testing.** Makes a text-to-speech clip and saves it in `output_dir` as `<chat id>-<chat title>.mp3`. See [Voice](#voice-experimental). |
+| `muse_generate_speech` | **Experimental, under testing.** Makes a text-to-speech clip and saves it in `output_dir` as `<chat id>-<chat title>.mp3`. See [Speech](#speech-experimental). |
 | `muse_list_voices` | Searches muse's voice catalog by words, gender, accent or tone. |
 | `muse_chat` | Sends a message to your muse agent. Pass `chat_id` to continue a conversation; `save_images_to` saves any images, videos or audio clips it sends. |
 | `muse_decide_approval` | Approves or denies something muse asked permission to do. |
@@ -69,6 +70,24 @@ Then refer to it by name and say what changes:
 muse-mcp attaches the saved images every time, labels them in the prompt, and
 asks muse to change only what you said.
 
+### Images
+
+muse's image tool takes only a prompt and images: no size, style, seed or
+negative-prompt setting. The ratio (`aspect_ratio`), style and anything to
+leave out are words in the prompt, and the ratio is a request, not a fixed
+canvas. muse-mcp adds a few inputs that it turns into prompt wording:
+
+- `edit_image` with `change` and `keep`: edit a real photo, for example a
+  product you sell. "Keep" is a request: muse regenerates the photo, so
+  compare the result with the real item before you post it.
+- `reference_roles`: one role per reference image ("the product: shape and
+  colour exact", "lighting mood only").
+- `count`: 1 to 4 separate versions in one request (muse's limit).
+
+Text inside an image is unreliable, especially Vietnamese tone marks. For a
+shop name, price or date, make the image without text and add the text in a
+design tool such as Canva. The `muse` skill's `image.md` has the rest.
+
 ## Command line
 
 The same binary works without Claude Code:
@@ -76,8 +95,11 @@ The same binary works without Claude Code:
 ```sh
 muse-mcp image -o fox.png "a red fox in a snowy forest"
 muse-mcp image -o fox-asleep.png --character fox --scene snowy-forest --change "the fox is asleep"
+muse-mcp image -o yarn.png --edit yarn.jpg --change "the background: plain cream studio" \
+  --keep "the yarn's exact colour, twist and number of balls"
+muse-mcp image -o ideas.png --count 3 --ref logo.png --role "the shop logo, colours only" "a cosy yarn shop window"
 muse-mcp video -o steam.mp4 --ref teapot.png "steam rises from the teapot"   # experimental
-muse-mcp voice -o clips --voice Helio "Hello from muse."                 # experimental
+muse-mcp speech -o clips --voice Helio "Hello from muse."                # experimental
 muse-mcp voices --gender female --accent british warm
 muse-mcp chat "what can you do?"
 muse-mcp chat --chat <chat_id> --save out/ "make it red"
@@ -104,14 +126,14 @@ text only, in which case the call fails with muse's reply. Videos are saved
 as muse sends them; if that is a `.webm` and you asked for `.mp4`, the file
 keeps the `.webm` extension.
 
-## Voice (experimental)
+## Speech (experimental)
 
-`muse_generate_voice` and `muse-mcp voice` make a text-to-speech clip of the
+`muse_generate_speech` and `muse-mcp speech` make a text-to-speech clip of the
 exact text you give and save it as `.mp3` in a folder (`output_dir`, `-o`;
 the current folder by default). The file is named after muse's chat:
 `<chat id>-<chat title>.mp3`, for example
 `5d0f89f3-d78e-4f1d-b212-5d62a3b3b8fe-Generate-Vietnamese-text-to-speech.mp3`,
-or `<chat id>-voice.mp3` if muse hasn't named the chat. Pass a voice name (for example
+or `<chat id>-speech.mp3` if muse hasn't named the chat. Pass a voice name (for example
 `Helio` or `Aria`) or leave it out and muse picks one.
 
 muse's voice tool takes only a voice, a language and a speed (1 to 200, 100
@@ -129,7 +151,7 @@ written:
 | confident | 100 | short strong sentences, no hesitation words |
 
 ```sh
-muse-mcp voice -o clips --voice "Sparkling Whistle" --language "Vietnamese (vi-VN)" --speed 120 \
+muse-mcp speech -o clips --voice "Sparkling Whistle" --language "Vietnamese (vi-VN)" --speed 120 \
   "Quán trà sữa Mây khai trương rồi! Mua một tặng một! Ghé quán ngay nhé!"
 ```
 
@@ -139,7 +161,7 @@ picks its own from the wording.
 For speech that should sound like a real person talking, the script needs a
 few humanizer words: one every two or three sentences ("well", "haha",
 "ừm", "à", "ủa", "na ja"), a "..." for a pause, contractions in English.
-Leave them out of formal announcements. The `muse-voice` skill has the
+Leave them out of formal announcements. The `muse` skill's `speech.md` has the
 lists for English, Vietnamese and German.
 
 Write the script as it should sound: numbers, prices and dates in words, no
