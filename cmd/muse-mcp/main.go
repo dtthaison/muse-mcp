@@ -26,7 +26,7 @@ import (
 	"github.com/dtthaison/muse-mcp/internal/voices"
 )
 
-const version = "0.3.0"
+const version = "0.4.0"
 
 func main() {
 	os.Exit(run())
@@ -59,6 +59,8 @@ func run() int {
 	if err != nil {
 		exe = "muse-mcp"
 	}
+	home, _ := os.UserHomeDir()
+	dir, _ := os.Getwd()
 	fi, _ := os.Stdin.Stat()
 	return cli.Run(ctx, os.Args[1:], cli.Env{
 		Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,
@@ -69,6 +71,8 @@ func run() int {
 		Serve:       func(ctx context.Context) error { return serve(ctx, paths, log, lib, cat) },
 		Claude:      runClaude,
 		Exe:         exe,
+		Home:        home,
+		Dir:         dir,
 		Version:     version,
 	})
 }

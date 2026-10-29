@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -55,9 +56,27 @@ type videoIn struct {
 // VoiceArgs are the inputs of muse_generate_voice (and the CLI's voice command).
 type VoiceArgs struct {
 	OutputPath string `json:"output_path" jsonschema:"where to save the audio: a .mp3 (or .wav, .ogg) path; relative paths resolve against the project directory"`
-	Text       string `json:"text" jsonschema:"what the voice says, word for word"`
+	Text       string `json:"text" jsonschema:"the script: only the words to speak, written as they should sound (numbers, prices and dates in words; no links, emoji, markup, stage directions or speaker labels; Vietnamese with full tone marks)"`
 	Voice      string `json:"voice,omitempty" jsonschema:"a voice name from muse's catalog (see muse_list_voices), e.g. Helio or Aria; empty lets muse pick"`
-	Style      string `json:"style,omitempty" jsonschema:"how to say it, e.g. slow and calm, cheerful"`
+	Language   string `json:"language,omitempty" jsonschema:"language and locale of the script, e.g. Vietnamese (vi-VN), English (en-GB)"`
+	Dialect    string `json:"dialect,omitempty" jsonschema:"one accent or dialect, e.g. Southern Vietnamese (Saigon), Northern Vietnamese (Hanoi), neutral American"`
+	UseCase    string `json:"use_case,omitempty" jsonschema:"audience, purpose and length, e.g. 30-second social video for shoppers aged 20-35"`
+	Style      string `json:"style,omitempty" jsonschema:"3 to 5 traits: persona, one emotion, voice quality, pace, e.g. friendly shop owner, warm, clear bright voice, conversational pace"`
+
+	IgnoreScriptWarnings bool `json:"ignore_script_warnings,omitempty" jsonschema:"send the script even though muse-mcp flagged things a voice would read wrongly"`
+}
+
+// ScriptError means the script has things a voice would read wrongly.
+type ScriptError struct{ Warnings []string }
+
+func (e *ScriptError) Error() string {
+	return e.Explain("set ignore_script_warnings")
+}
+
+// Explain says what to fix; override names how to send the script anyway.
+func (e *ScriptError) Explain(override string) string {
+	return fmt.Sprintf("the script needs fixing before muse is asked (no quota used); it %s.\nFix the script, or %s to send it as is",
+		strings.Join(e.Warnings, "; it "), override)
 }
 
 type listVoicesIn struct {
@@ -112,7 +131,7 @@ const (
 	descStatus   = `Check whether muse-mcp's Chrome is running, whether you are logged in to muse.ai, and list approvals waiting for the owner's decision.`
 	descGenerate = `Generate an image with muse.ai and save it to output_path (.png, .jpg or .webp). For recurring characters or scenes, pass their saved names in characters/scene so the same reference images are attached every time. To keep everything the same and change one thing, use change (e.g. "the fox is now asleep") instead of re-describing the scene. Takes about a minute.`
 	descVideo    = `EXPERIMENTAL, under testing. Generate a short video with muse.ai and save it to output_path (.mp4 or .webm). Same inputs as muse_generate_image. muse blocks AI video for some accounts and regions; it may then make a substitute (for example an animated still), so read the reply. Can take several minutes.`
-	descVoice    = `EXPERIMENTAL, under testing. Make a text-to-speech voice clip with muse.ai and save it to output_path (.mp3). Pass the exact text; optionally a voice name from muse_list_voices (e.g. Helio, Aria) and a style. Takes about a minute.`
+	descVoice    = `EXPERIMENTAL, under testing. Make a text-to-speech voice clip with muse.ai and save it to output_path (.mp3). Keep the three parts apart: the voice (a catalog name from muse_list_voices), the direction (language, dialect, use_case, style; never spoken), and the script in text (only the words to say). Scripts with digits, symbols, links, emoji, markup or speaker labels are refused before muse is asked, so no quota is spent; fix them or set ignore_script_warnings. Takes about a minute.`
 	descVoices   = `Search muse's text-to-speech voice catalog (names to pass to muse_generate_voice) by words, gender, accent or tone. The owner imports the catalog once with "muse-mcp voices import FILE".`
 	descChat     = `Send a message to the owner's muse.ai agent and return its reply. Pass chat_id from an earlier result to continue that conversation. muse may ask to act on the owner's accounts; that comes back as status "needs_approval".`
 	descDecide   = `Approve or deny an action muse asked permission for. This is the owner's decision: only call it after the owner has told you which to choose for this specific approval.`
@@ -250,7 +269,11 @@ func BuildVoiceRequest(in VoiceArgs) (muse.ImageRequest, error) {
 	if err := output.CheckAudioPath(in.OutputPath); err != nil {
 		return muse.ImageRequest{}, err
 	}
-	built, err := prompt.Voice(prompt.VoiceInput{Text: in.Text, Voice: in.Voice, Style: in.Style})
+	if w := prompt.CheckScript(in.Text, in.Language); len(w) > 0 && !in.IgnoreScriptWarnings {
+		return muse.ImageRequest{}, &ScriptError{Warnings: w}
+	}
+	built, err := prompt.Voice(prompt.VoiceInput{Text: in.Text, Voice: in.Voice, Language: in.Language,
+		Dialect: in.Dialect, UseCase: in.UseCase, Style: in.Style})
 	if err != nil {
 		return muse.ImageRequest{}, err
 	}

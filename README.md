@@ -26,12 +26,16 @@ Tested on macOS.
 
 ```sh
 go install github.com/dtthaison/muse-mcp/cmd/muse-mcp@latest
-muse-mcp install   # adds it to Claude Code (runs `claude mcp add -s user muse ...`)
+muse-mcp install   # adds it to Claude Code (runs `claude mcp add -s user muse ...`) and its skills
 muse-mcp login     # log in to muse.ai once, in the Chrome window that opens
 ```
 
-Restart Claude Code and the muse tools are there. `muse-mcp uninstall` removes
-it again (your login and saved references stay in `~/.muse-mcp`).
+Restart Claude Code and the muse tools are there. `install` also copies the
+`muse-voice` skill, which teaches Claude how to write voice scripts and
+direction, into `~/.claude/skills` (or `./.claude/skills` with `--scope project`
+or `local`). `muse-mcp uninstall` removes both again (your login and saved
+references stay in `~/.muse-mcp`). Run `install` again after upgrading to get
+the newest skill.
 
 From a clone, use `go build -o muse-mcp ./cmd/muse-mcp && ./muse-mcp install`.
 
@@ -104,8 +108,26 @@ keeps the `.webm` extension.
 
 `muse_generate_voice` and `muse-mcp voice` make a text-to-speech clip of the
 exact text you give and save it as `.mp3`. Pass a voice name (for example
-`Helio` or `Aria`) or leave it out and muse picks one; `style` says how to say
-it ("slow and calm").
+`Helio` or `Aria`) or leave it out and muse picks one.
+
+muse-mcp keeps three things apart in what it sends muse: the voice, the
+direction (`language`, `dialect`, `use_case`, and `style` with 3 to 5 traits
+such as "friendly shop owner, warm, clear, conversational pace"), and the
+script, which muse is told to read word for word.
+
+```sh
+muse-mcp voice -o ad.mp3 --voice "Sparkling Whistle" --language "Vietnamese (vi-VN)" \
+  --dialect "Southern (Saigon)" --use "30-second shop video" --style "warm, upbeat, clear" \
+  "Giảm năm mươi phần trăm cho mọi đơn hàng hôm nay."
+```
+
+Write the script as it should sound: numbers, prices and dates in words, no
+links, emoji, markdown, stage directions or speaker labels, and Vietnamese
+with full tone marks. muse-mcp checks for these before asking muse and refuses
+a script that has them (no quota used); `ignore_script_warnings` (`--force` on
+the command line) sends it anyway.
+
+If you publish a clip, say that the voice is AI-generated.
 
 muse has a catalog of about 1,200 named voices. muse-mcp doesn't ship it.
 Ask muse once for "your voice catalog as a CSV file with name, gender, accent,
@@ -120,6 +142,7 @@ muse-mcp voices accents      # how many voices each accent has
 
 An accent is how a voice sounds, not a language it speaks well: muse warned
 that a Vietnamese-accent voice "may sound a bit imperfect" reading Vietnamese.
+Try the hardest 15 to 30 seconds of a long script first.
 
 Then Claude can search it with `muse_list_voices` and pick a voice by name.
 

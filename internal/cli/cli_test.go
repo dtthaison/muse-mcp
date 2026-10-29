@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"image"
 	"image/png"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/dtthaison/muse-mcp/internal/muse"
 	"github.com/dtthaison/muse-mcp/internal/output"
 	"github.com/dtthaison/muse-mcp/internal/voices"
+	"github.com/dtthaison/muse-mcp/skills"
 )
 
 type decision struct {
@@ -63,12 +65,14 @@ type harness struct {
 	out, errOut bytes.Buffer
 	claude      [][]string
 	served      bool
+	home, dir   string
 }
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	return &harness{svc: &fakeService{result: muse.Result{Status: "done", ChatID: "c1", ChatURL: "https://muse.ai/thread/c1", Reply: "Here you go."}},
-		lib: library.Open(filepath.Join(t.TempDir(), "library")), voices: voices.Open(filepath.Join(t.TempDir(), "voices.csv"))}
+		lib: library.Open(filepath.Join(t.TempDir(), "library")), voices: voices.Open(filepath.Join(t.TempDir(), "voices.csv")),
+		home: t.TempDir(), dir: t.TempDir()}
 }
 
 func (h *harness) run(stdin string, interactive bool, args ...string) int {
@@ -83,6 +87,8 @@ func (h *harness) run(stdin string, interactive bool, args ...string) int {
 		Serve:  func(context.Context) error { h.served = true; return nil },
 		Claude: func(_ context.Context, args ...string) error { h.claude = append(h.claude, args); return nil },
 		Exe:    "/opt/bin/muse-mcp",
+		Home:   h.home,
+		Dir:    h.dir,
 	})
 }
 
@@ -330,7 +336,7 @@ func TestVoice(t *testing.T) {
 		t.Fatalf("code=%d stderr=%q", code, h.errOut.String())
 	}
 	got := h.svc.images[0]
-	if got.Media != muse.MediaVoice || !strings.Contains(got.Text, `with the voice "Helio"`) || !strings.Contains(got.Text, "Xin chào bạn") {
+	if got.Media != muse.MediaVoice || !strings.Contains(got.Text, `Voice: "Helio"`) || !strings.Contains(got.Text, "Xin chào bạn") {
 		t.Fatalf("request %+v", got)
 	}
 	if !strings.Contains(h.out.String(), "saved /w/hi.mp3 (16 KB)") {
@@ -374,5 +380,63 @@ func TestVoicesAllAndAccents(t *testing.T) {
 		!strings.Contains(h.out.String(), "British") || !strings.Contains(h.out.String(), "30") ||
 		strings.Index(h.out.String(), "British") > strings.Index(h.out.String(), "Vietnamese") {
 		t.Fatalf("accents: code=%d stdout=%q", code, h.out.String())
+	}
+}
+
+func TestVoiceDirectionAndWarnings(t *testing.T) {
+	h := newHarness(t)
+	if code := h.run("", true, "voice", "-o", "a.mp3", "--language", "Vietnamese (vi-VN)", "--dialect", "Southern (Saigon)",
+		"--use", "shop video", "Xin chào các bạn"); code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, h.errOut.String())
+	}
+	if got := h.svc.images[0].Text; !strings.Contains(got, "- Dialect: Southern (Saigon)") || !strings.Contains(got, "- Use: shop video") {
+		t.Fatalf("text %q", got)
+	}
+	if code := h.run("", true, "voice", "-o", "a.mp3", "Giá 199.000đ"); code != 1 || len(h.svc.images) != 1 ||
+		!strings.Contains(h.errOut.String(), "digits") || !strings.Contains(h.errOut.String(), "--force") {
+		t.Fatalf("code=%d calls=%d stderr=%q", code, len(h.svc.images), h.errOut.String())
+	}
+	if code := h.run("", true, "voice", "-o", "a.mp3", "--force", "Giá 199.000đ"); code != 0 || len(h.svc.images) != 2 {
+		t.Fatalf("--force: code=%d stderr=%q", code, h.errOut.String())
+	}
+}
+
+func TestInstallCopiesSkills(t *testing.T) {
+	h := newHarness(t)
+	want, err := fs.ReadFile(skills.FS, "muse-voice/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	userSkill := filepath.Join(h.home, ".claude", "skills", "muse-voice", "SKILL.md")
+	projSkill := filepath.Join(h.dir, ".claude", "skills", "muse-voice", "SKILL.md")
+	if code := h.run("", true, "install"); code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, h.errOut.String())
+	}
+	if got, err := os.ReadFile(userSkill); err != nil || !bytes.Equal(got, want) {
+		t.Fatalf("user skill: %v", err)
+	}
+	if !strings.Contains(h.out.String(), "muse-voice") {
+		t.Fatalf("stdout %q", h.out.String())
+	}
+	if code := h.run("", true, "install", "--scope", "project"); code != 0 {
+		t.Fatalf("code=%d", code)
+	}
+	if _, err := os.Stat(projSkill); err != nil {
+		t.Fatal(err)
+	}
+	// Uninstall removes only what install wrote.
+	extra := filepath.Join(filepath.Dir(userSkill), "notes.md")
+	os.WriteFile(extra, []byte("mine"), 0o600)
+	if code := h.run("", true, "uninstall"); code != 0 {
+		t.Fatalf("code=%d", code)
+	}
+	if _, err := os.Stat(userSkill); !os.IsNotExist(err) {
+		t.Fatalf("user skill still there: %v", err)
+	}
+	if _, err := os.Stat(extra); err != nil {
+		t.Fatalf("uninstall removed the owner's file: %v", err)
+	}
+	if _, err := os.Stat(projSkill); err != nil {
+		t.Fatalf("project skill removed by a user-scope uninstall: %v", err)
 	}
 }

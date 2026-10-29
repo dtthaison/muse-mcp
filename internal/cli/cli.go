@@ -10,6 +10,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
@@ -18,6 +21,7 @@ import (
 	"github.com/dtthaison/muse-mcp/internal/output"
 	"github.com/dtthaison/muse-mcp/internal/tools"
 	"github.com/dtthaison/muse-mcp/internal/voices"
+	"github.com/dtthaison/muse-mcp/skills"
 )
 
 // Service is what the commands need from muse.Service.
@@ -38,6 +42,8 @@ type Env struct {
 	Serve       func(ctx context.Context) error                 // the MCP server on stdio
 	Claude      func(ctx context.Context, args ...string) error // runs the claude CLI
 	Exe         string                                          // this binary, for install
+	Home        string                                          // user scope installs skills in Home/.claude/skills
+	Dir         string                                          // project and local scope in Dir/.claude/skills
 	Version     string
 }
 
@@ -67,7 +73,8 @@ Usage:
       --ref-notes TEXT     what the extra references are for
       --aspect RATIO       e.g. 16:9
 
-  muse-mcp voice -o OUT.mp3 [--voice NAME] [--style TEXT] TEXT   (experimental)
+  muse-mcp voice -o OUT.mp3 [--voice NAME] [--language L] [--dialect D] [--use U]
+                 [--style TEXT] [--force] TEXT   (experimental)
   muse-mcp voices [--gender G] [--accent A] [--tone T] [--limit N | --all] [WORDS]
   muse-mcp voices accents          how many voices each accent has
   muse-mcp voices import FILE.csv   muse's voice catalog (ask muse for it as CSV)
@@ -203,19 +210,70 @@ func (r *runner) install(ctx context.Context, cmd string, args []string) int {
 	if _, err := parse(fs, args); err != nil {
 		return exitUsage
 	}
-	claudeArgs := []string{"mcp", "remove", "-s", *scope, "muse"}
-	if cmd == "install" {
-		claudeArgs = []string{"mcp", "add", "-s", *scope, "muse", "--", r.env.Exe}
+	dir := filepath.Join(r.env.Dir, ".claude", "skills")
+	if *scope == "user" {
+		dir = filepath.Join(r.env.Home, ".claude", "skills")
 	}
-	if err := r.env.Claude(ctx, claudeArgs...); err != nil {
+	if cmd == "uninstall" {
+		// Skills first, so they go even if muse was already removed from Claude Code.
+		if err := removeSkills(dir); err != nil {
+			return r.fail(err)
+		}
+		if err := r.env.Claude(ctx, "mcp", "remove", "-s", *scope, "muse"); err != nil {
+			return r.fail(err)
+		}
+		fmt.Fprintln(r.env.Stdout, "Removed muse and its skills from Claude Code. Your login and saved references in ~/.muse-mcp are kept.")
+		return exitOK
+	}
+	if err := r.env.Claude(ctx, "mcp", "add", "-s", *scope, "muse", "--", r.env.Exe); err != nil {
 		return r.fail(err)
 	}
-	if cmd == "install" {
-		fmt.Fprintln(r.env.Stdout, "Added muse to Claude Code. Restart Claude Code, then run `muse-mcp login` once if you haven't.")
-	} else {
-		fmt.Fprintln(r.env.Stdout, "Removed muse from Claude Code. Your login and saved references in ~/.muse-mcp are kept.")
+	names, err := installSkills(dir)
+	if err != nil {
+		return r.fail(err)
 	}
+	fmt.Fprintf(r.env.Stdout, "Added muse to Claude Code, and the skills %s in %s.\n", strings.Join(names, ", "), dir)
+	fmt.Fprintln(r.env.Stdout, "Restart Claude Code, then run `muse-mcp login` once if you haven't.")
 	return exitOK
+}
+
+// installSkills writes every embedded skill into dir, replacing older copies.
+func installSkills(dir string) ([]string, error) {
+	entries, err := fs.ReadDir(skills.FS, ".")
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, e := range entries {
+		b, err := fs.ReadFile(skills.FS, e.Name()+"/SKILL.md")
+		if err != nil {
+			return nil, err
+		}
+		if err := os.MkdirAll(filepath.Join(dir, e.Name()), 0o755); err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(filepath.Join(dir, e.Name(), "SKILL.md"), b, 0o644); err != nil {
+			return nil, err
+		}
+		names = append(names, e.Name())
+	}
+	return names, nil
+}
+
+// removeSkills removes what installSkills wrote, and each skill directory
+// once it is empty; files the owner added stay.
+func removeSkills(dir string) error {
+	entries, err := fs.ReadDir(skills.FS, ".")
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if err := os.Remove(filepath.Join(dir, e.Name(), "SKILL.md")); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		os.Remove(filepath.Join(dir, e.Name())) // fails while not empty
+	}
+	return nil
 }
 
 func (r *runner) status(ctx context.Context, svc Service) int {
@@ -284,7 +342,11 @@ func (r *runner) voice(ctx context.Context, args []string) int {
 	var a tools.VoiceArgs
 	fs.StringVar(&a.OutputPath, "o", "", "output file")
 	fs.StringVar(&a.Voice, "voice", "", "voice name")
-	fs.StringVar(&a.Style, "style", "", "how to say it")
+	fs.StringVar(&a.Style, "style", "", "how to say it: 3 to 5 traits")
+	fs.StringVar(&a.Language, "language", "", "language and locale, e.g. Vietnamese (vi-VN)")
+	fs.StringVar(&a.Dialect, "dialect", "", "one accent or dialect, e.g. Southern Vietnamese (Saigon)")
+	fs.StringVar(&a.UseCase, "use", "", "audience, purpose and length")
+	fs.BoolVar(&a.IgnoreScriptWarnings, "force", false, "send the script despite warnings")
 	asJSON := fs.Bool("json", false, "")
 	rest, err := parse(fs, args)
 	if err != nil {
@@ -295,6 +357,9 @@ func (r *runner) voice(ctx context.Context, args []string) int {
 	}
 	a.Text = strings.Join(rest, " ")
 	req, err := tools.BuildVoiceRequest(a)
+	if se := (*tools.ScriptError)(nil); errors.As(err, &se) {
+		return r.fail(errors.New(se.Explain("pass --force")))
+	}
 	if err != nil {
 		return r.fail(err)
 	}
