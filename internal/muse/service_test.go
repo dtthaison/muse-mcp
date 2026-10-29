@@ -19,10 +19,10 @@ import (
 	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 
-	"pp/muse-mcp/internal/browser"
-	"pp/muse-mcp/internal/chats"
-	"pp/muse-mcp/internal/fakemuse"
-	"pp/muse-mcp/internal/musepage"
+	"github.com/dtthaison/muse-mcp/internal/browser"
+	"github.com/dtthaison/muse-mcp/internal/chats"
+	"github.com/dtthaison/muse-mcp/internal/fakemuse"
+	"github.com/dtthaison/muse-mcp/internal/musepage"
 )
 
 func fastTiming() Timing {
@@ -250,7 +250,7 @@ func TestChatSavesImages(t *testing.T) {
 
 func TestChatUnknownID(t *testing.T) {
 	f := newFixture(t, fastTiming())
-	_, err := f.svc.Chat(context.Background(), ChatRequest{ChatID: "123e4567-e89b-42d3-a456-426614174001", Message: "hi"})
+	_, err := f.svc.Chat(context.Background(), ChatRequest{ChatID: "123e4567-e89b-42d3-a456-426614174000", Message: "hi"})
 	if !errors.Is(err, ErrUnknownChat) {
 		t.Fatalf("err = %v", err)
 	}

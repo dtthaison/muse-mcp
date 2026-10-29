@@ -52,7 +52,7 @@ none of its code is used or run.
 
 ## 3. What the spike established (2026-10-29, Chrome 156, live account)
 
-Throwaway scripts are in `docs/superpowers/specs/spike/` (Node, raw CDP). They
+Throwaway scripts are in `docs/spike/` (Node, raw CDP). They
 are proven against the live site and are the best reference for the page logic.
 
 - **muse.ai is a Meta product.** It is a chat-based agent ("hatch") with a cloud

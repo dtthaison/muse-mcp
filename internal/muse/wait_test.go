@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"pp/muse-mcp/internal/musepage"
+	"github.com/dtthaison/muse-mcp/internal/musepage"
 )
 
 var t0 = time.Date(2026, 10, 29, 12, 0, 0, 0, time.UTC)

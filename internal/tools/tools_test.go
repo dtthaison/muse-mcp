@@ -14,8 +14,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"pp/muse-mcp/internal/library"
-	"pp/muse-mcp/internal/muse"
+	"github.com/dtthaison/muse-mcp/internal/library"
+	"github.com/dtthaison/muse-mcp/internal/muse"
 )
 
 type fakeService struct {

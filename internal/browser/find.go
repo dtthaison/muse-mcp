@@ -5,7 +5,7 @@ import (
 	"os"
 	"os/exec"
 
-	"pp/muse-mcp/internal/config"
+	"github.com/dtthaison/muse-mcp/internal/config"
 )
 
 // FindChrome returns the Chrome binary to launch: MUSE_CHROME or the macOS

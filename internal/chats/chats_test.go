@@ -9,10 +9,10 @@ import (
 func TestAddPersists(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "chats.json")
 	r := Load(path)
-	if err := r.Add("123e4567-e89b-42d3-a456-426614174001"); err != nil {
+	if err := r.Add("123e4567-e89b-42d3-a456-426614174000"); err != nil {
 		t.Fatal(err)
 	}
-	if !Load(path).Known("123e4567-e89b-42d3-a456-426614174001") {
+	if !Load(path).Known("123e4567-e89b-42d3-a456-426614174000") {
 		t.Fatal("reloaded registry lost the chat")
 	}
 }

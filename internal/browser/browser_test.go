@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"pp/muse-mcp/internal/fakemuse"
-	"pp/muse-mcp/internal/musepage"
+	"github.com/dtthaison/muse-mcp/internal/fakemuse"
+	"github.com/dtthaison/muse-mcp/internal/musepage"
 )
 
 func newBrowser(t *testing.T, lock string) *Browser {

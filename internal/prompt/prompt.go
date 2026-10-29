@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"pp/muse-mcp/internal/library"
+	"github.com/dtthaison/muse-mcp/internal/library"
 )
 
 // MaxAttachments caps the files sent with one request.

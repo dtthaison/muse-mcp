@@ -1,6 +1,8 @@
 # muse-mcp Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> Historical: the task-by-task plan used to build the first version. The module
+> was later renamed from `pp/muse-mcp` to `github.com/dtthaison/muse-mcp`; see
+> [design.md](design.md) for the current design.
 
 **Goal:** A Go MCP server (stdio) that lets Claude Code generate images and chat
 through the owner's muse.ai account. It drives a dedicated Chrome profile and
@@ -19,9 +21,9 @@ this onto MCP tools. A fake muse page (`internal/fakemuse`) served by
 `github.com/chromedp/chromedp` v0.21.0, `golang.org/x/image` v0.47.0 (webp
 decode), stdlib `image/png`, `image/jpeg`, `log/slog`.
 
-**Spec:** `docs/superpowers/specs/2026-10-29-muse-mcp-design.md`. Read it
+**Spec:** `docs/design.md`. Read it
 first. §3 has the verified page facts, and the spike scripts in
-`docs/superpowers/specs/spike/` are working reference code for the page logic.
+`docs/spike/` are working reference code for the page logic.
 
 ## Global Constraints
 
@@ -285,7 +287,7 @@ All selectors and scripts are copied from spec §3: `textarea`, `[data-hatch-she
 - [ ] **Step 1: Write the failing tests.** Each test runs `chromedp.NewExecAllocator` headless with `ExecPath(FindChrome())`, then `chromedp.NewContext`, against `fakemuse.New()`. Skip if `FindChrome` errors.
 
 ```go
-func TestThreadID(t *testing.T)               // "https://muse.ai/thread/123e4567-e89b-42d3-a456-426614174001" → ok; ".../thread/new" → !ok; "https://muse.ai/" → !ok
+func TestThreadID(t *testing.T)               // "https://muse.ai/thread/123e4567-e89b-42d3-a456-426614174000" → ok; ".../thread/new" → !ok; "https://muse.ai/" → !ok
 func TestOpenReady(t *testing.T)              // Open(NewChatURL(srv.URL)) → Ready, !LoggedOut
 func TestOpenLoggedOut(t *testing.T)          // srv.SetLoggedOut(true) → errors.Is(err, ErrLoggedOut)
 func TestSendImageFlow(t *testing.T)          // Send "[fake:image] x"; poll Snapshot: URL gets thread id; eventually Images len 1 with blob: src, !Busy, AgentTexts[0]=="Here is your image."; Download → bytes decode as 64x48 PNG

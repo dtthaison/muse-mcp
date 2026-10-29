@@ -1,6 +1,6 @@
 package muse
 
-import "pp/muse-mcp/internal/musepage"
+import "github.com/dtthaison/muse-mcp/internal/musepage"
 
 // agentTexts reads the agent messages on a chat's open tab.
 func (s *Service) agentTexts(chatID string) []string {
