@@ -51,9 +51,9 @@ const (
 
 var stallTexts = []string{"Still sending", "Connecting..."}
 
-// Button labels inside an approval card, matched on trimmed text. The deny
-// labels come from an earlier project; the approve labels are unverified (no approval
-// appeared in the spike), so an unmatched card fails loudly instead of guessing.
+// Button labels inside an approval card, matched on trimmed text. The approve
+// labels are unverified (no approval appeared in the spike), so an unmatched
+// card fails loudly instead of guessing.
 var (
 	denyLabels    = `^(deny|decline|reject|don.t allow)$`
 	approveLabels = `^(approve|allow|confirm|yes|continue)$`

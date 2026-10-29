@@ -8,8 +8,8 @@ exact first frame, and there's no first-and-last-frame mode.
 
 ## Before the call
 
-- muse blocks AI video for some accounts and regions (this owner's account
-  was blocked as of October 2026). Say so up front. If the reply says it was
+- muse blocks AI video for some accounts and regions. Say so up front
+  unless a video has worked for this owner before. If the reply says it was
   blocked, or muse sent a still or an animated still instead, tell the owner
   and offer: a still image (`muse_generate_image`), or a prompt to paste into
   Kling, Hailuo or CapCut, written with the same rules below.
