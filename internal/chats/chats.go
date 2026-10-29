@@ -7,17 +7,19 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 )
 
-type entry struct {
+// Chat is one chat this server created.
+type Chat struct {
 	ID      string    `json:"id"`
 	Created time.Time `json:"created"`
 }
 
 type file struct {
-	Chats []entry `json:"chats"`
+	Chats []Chat `json:"chats"`
 }
 
 // Registry is safe for concurrent use.
@@ -58,6 +60,29 @@ func (r *Registry) Add(id string) error {
 	return r.save()
 }
 
+// Remove forgets id (after the chat was deleted) and writes the file.
+func (r *Registry) Remove(id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.ids[id]; !ok {
+		return nil
+	}
+	delete(r.ids, id)
+	return r.save()
+}
+
+// List returns the chats, oldest first.
+func (r *Registry) List() []Chat {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]Chat, 0, len(r.ids))
+	for id, created := range r.ids {
+		out = append(out, Chat{ID: id, Created: created})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Created.Before(out[j].Created) })
+	return out
+}
+
 func (r *Registry) Known(id string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -81,7 +106,7 @@ func (r *Registry) Count() int {
 func (r *Registry) save() error {
 	var f file
 	for id, created := range r.ids {
-		f.Chats = append(f.Chats, entry{ID: id, Created: created})
+		f.Chats = append(f.Chats, Chat{ID: id, Created: created})
 	}
 	data, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {

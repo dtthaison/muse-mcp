@@ -11,6 +11,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/dtthaison/muse-mcp/internal/chats"
 	"github.com/dtthaison/muse-mcp/internal/library"
 	"github.com/dtthaison/muse-mcp/internal/muse"
 	"github.com/dtthaison/muse-mcp/internal/output"
@@ -24,6 +25,8 @@ type Service interface {
 	Chat(ctx context.Context, r muse.ChatRequest) (muse.Result, error)
 	Decide(ctx context.Context, chatID, approvalID string, approve bool) (muse.Result, error)
 	Status(ctx context.Context) (muse.StatusInfo, error)
+	DeleteChat(ctx context.Context, chatID string) error
+	ListChats() []chats.Chat
 }
 
 type statusIn struct{}
@@ -125,21 +128,35 @@ type refsOut struct {
 	References []library.Ref `json:"references"`
 }
 
+type chatIDIn struct {
+	ChatID string `json:"chat_id" jsonschema:"a chat_id from an earlier muse-mcp result or from muse_list_chats"`
+}
+
+type deletedOut struct {
+	Deleted string `json:"deleted"`
+}
+
+type chatsOut struct {
+	Chats []chats.Chat `json:"chats"`
+}
+
 type okOut struct {
 	OK bool `json:"ok"`
 }
 
 const (
-	descStatus   = `Check whether muse-mcp's Chrome is running, whether you are logged in to muse.ai, and list approvals waiting for the owner's decision.`
-	descGenerate = `Generate an image with muse.ai and save it to output_path (.png, .jpg or .webp). For recurring characters or scenes, pass their saved names in characters/scene so the same reference images are attached every time. To keep everything the same and change one thing, use change (e.g. "the fox is now asleep") instead of re-describing the scene. For a real product, edit its real photo: edit_image plus change (what may change) and keep (what must stay exact). Give each reference image a role in reference_roles. count makes up to 4 separate versions. muse has no size, style, seed or negative-prompt setting: ratio, style and exclusions are words in the prompt. Takes about a minute.`
-	descVideo    = `EXPERIMENTAL, under testing. Generate a short video with muse.ai and save it to output_path (.mp4 or .webm). Same inputs as muse_generate_image. muse blocks AI video for some accounts and regions; it may then make a substitute (for example an animated still), so read the reply. Can take several minutes.`
-	descVoice    = `EXPERIMENTAL, under testing. Make a text-to-speech voice clip with muse.ai and save it in output_dir as <chat id>-<chat title>.mp3. muse's voice tool takes only a voice (a catalog name from muse_list_voices), a language and a speed: no emotion, style, pitch or tags. Put the feeling into the script's wording and punctuation and into speed. text is only the words to say; scripts with digits, symbols, links, emoji, markup, tags, phrases in capitals or speaker labels are refused before muse is asked, so no quota is spent; fix them or set ignore_script_warnings. Takes about a minute.`
-	descVoices   = `Search muse's text-to-speech voice catalog (names to pass to muse_generate_speech) by words, gender, accent or tone. The owner imports the catalog once with "muse-mcp voices import FILE".`
-	descChat     = `Send a message to the owner's muse.ai agent and return its reply. Pass chat_id from an earlier result to continue that conversation. muse may ask to act on the owner's accounts; that comes back as status "needs_approval".`
-	descDecide   = `Approve or deny an action muse asked permission for. This is the owner's decision: only call it after the owner has told you which to choose for this specific approval.`
-	descSaveRef  = `Save a named character or scene (images + a fixed description) for consistent images later. Use kind "character" for who (face, markings, outfit) and "scene" for where (layout, lighting, style).`
-	descListRefs = `List saved characters and scenes.`
-	descDelRef   = `Delete a saved character or scene.`
+	descStatus    = `Check whether muse-mcp's Chrome is running, whether you are logged in to muse.ai, and list approvals waiting for the owner's decision.`
+	descGenerate  = `Generate an image with muse.ai and save it to output_path (.png, .jpg or .webp). For recurring characters or scenes, pass their saved names in characters/scene so the same reference images are attached every time. To keep everything the same and change one thing, use change (e.g. "the fox is now asleep") instead of re-describing the scene. For a real product, edit its real photo: edit_image plus change (what may change) and keep (what must stay exact). Give each reference image a role in reference_roles. count makes up to 4 separate versions. muse has no size, style, seed or negative-prompt setting: ratio, style and exclusions are words in the prompt. Takes about a minute.`
+	descVideo     = `EXPERIMENTAL, under testing. Generate a short video with muse.ai and save it to output_path (.mp4 or .webm). Same inputs as muse_generate_image. muse blocks AI video for some accounts and regions; it may then make a substitute (for example an animated still), so read the reply. Can take several minutes.`
+	descVoice     = `EXPERIMENTAL, under testing. Make a text-to-speech voice clip with muse.ai and save it in output_dir as <chat id>-<chat title>.mp3. muse's voice tool takes only a voice (a catalog name from muse_list_voices), a language and a speed: no emotion, style, pitch or tags. Put the feeling into the script's wording and punctuation and into speed. text is only the words to say; scripts with digits, symbols, links, emoji, markup, tags, phrases in capitals or speaker labels are refused before muse is asked, so no quota is spent; fix them or set ignore_script_warnings. Takes about a minute.`
+	descVoices    = `Search muse's text-to-speech voice catalog (names to pass to muse_generate_speech) by words, gender, accent or tone. The owner imports the catalog once with "muse-mcp voices import FILE".`
+	descChat      = `Send a message to the owner's muse.ai agent and return its reply. Pass chat_id from an earlier result to continue that conversation. muse may ask to act on the owner's accounts; that comes back as status "needs_approval".`
+	descDecide    = `Approve or deny an action muse asked permission for. This is the owner's decision: only call it after the owner has told you which to choose for this specific approval.`
+	descSaveRef   = `Save a named character or scene (images + a fixed description) for consistent images later. Use kind "character" for who (face, markings, outfit) and "scene" for where (layout, lighting, style).`
+	descDelChat   = `Delete a muse chat that muse-mcp started (by chat_id), in muse and from muse-mcp's list. It cannot be undone and the chat's images and clips are gone from muse, so delete only when the owner asked, or when the results are saved and nobody needs the chat in muse any more. The owner's own chats are refused.`
+	descListChats = `List the chats muse-mcp started (chat_id and when), oldest first: the chats muse_chat can continue and muse_delete_chat can delete.`
+	descListRefs  = `List saved characters and scenes.`
+	descDelRef    = `Delete a saved character or scene.`
 )
 
 // Register adds the muse tools to s.
@@ -209,6 +226,19 @@ func Register(s *mcp.Server, svc Service, lib *library.Store, cat *voices.Catalo
 			}
 			res, err := svc.Decide(ctx, in.ChatID, in.ApprovalID, in.Decision == "approve")
 			return nil, res, err
+		})
+
+	mcp.AddTool(s, &mcp.Tool{Name: "muse_delete_chat", Description: descDelChat},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in chatIDIn) (*mcp.CallToolResult, deletedOut, error) {
+			if err := svc.DeleteChat(ctx, in.ChatID); err != nil {
+				return nil, deletedOut{}, err
+			}
+			return nil, deletedOut{Deleted: in.ChatID}, nil
+		})
+
+	mcp.AddTool(s, &mcp.Tool{Name: "muse_list_chats", Description: descListChats},
+		func(context.Context, *mcp.CallToolRequest, statusIn) (*mcp.CallToolResult, chatsOut, error) {
+			return nil, chatsOut{Chats: svc.ListChats()}, nil
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "muse_save_reference", Description: descSaveRef},

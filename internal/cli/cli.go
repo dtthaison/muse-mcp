@@ -16,6 +16,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/dtthaison/muse-mcp/internal/chats"
 	"github.com/dtthaison/muse-mcp/internal/library"
 	"github.com/dtthaison/muse-mcp/internal/muse"
 	"github.com/dtthaison/muse-mcp/internal/output"
@@ -38,6 +39,7 @@ type Env struct {
 	Interactive bool // stdin is a terminal, so approvals can be asked
 	Library     *library.Store
 	Voices      *voices.Catalog
+	Chats       *chats.Registry                                 // chats muse-mcp started, for listing
 	Muse        func() (Service, func(), error)                 // starts Chrome; the func shuts it down
 	Serve       func(ctx context.Context) error                 // the MCP server on stdio
 	Claude      func(ctx context.Context, args ...string) error // runs the claude CLI
@@ -85,6 +87,9 @@ Usage:
 
   muse-mcp chat [--chat ID] [--attach FILE]... [--save DIR] MESSAGE
 
+  muse-mcp chats                   the chats muse-mcp started (IDs and dates)
+  muse-mcp chats delete ID...      delete them in muse (cannot be undone)
+
   muse-mcp refs list
   muse-mcp refs save NAME --kind character|scene --desc TEXT [--replace] IMAGE...
   muse-mcp refs delete NAME
@@ -130,6 +135,8 @@ func Run(ctx context.Context, args []string, env Env) int {
 		return r.voices(rest)
 	case "chat":
 		return r.chat(ctx, rest)
+	case "chats":
+		return r.chats(ctx, rest)
 	case "refs":
 		return r.refs(rest)
 	case "version", "--version":
@@ -553,6 +560,38 @@ func size(n int) string {
 		return fmt.Sprintf("%d KB", n>>10)
 	}
 	return fmt.Sprintf("%d bytes", n)
+}
+
+// chats lists the chats muse-mcp started (without starting Chrome) or deletes
+// some of them.
+func (r *runner) chats(ctx context.Context, args []string) int {
+	out := r.env.Stdout
+	if len(args) == 0 || args[0] == "list" {
+		list := r.env.Chats.List()
+		if len(list) == 0 {
+			fmt.Fprintln(out, "No chats started by muse-mcp.")
+		}
+		for _, c := range list {
+			fmt.Fprintf(out, "%s  %s\n", c.ID, c.Created.Local().Format("2006-01-02 15:04"))
+		}
+		return exitOK
+	}
+	if args[0] != "delete" {
+		return r.usageErr("chats takes no arguments, or delete ID...")
+	}
+	ids := args[1:]
+	if len(ids) == 0 {
+		return r.usageErr("chats delete needs at least one chat ID")
+	}
+	return r.withMuse(func(svc Service) int {
+		for _, id := range ids {
+			if err := svc.DeleteChat(ctx, id); err != nil {
+				return r.fail(fmt.Errorf("chat %s: %w", id, err))
+			}
+			fmt.Fprintln(out, "Deleted chat", id)
+		}
+		return exitOK
+	})
 }
 
 func (r *runner) refs(args []string) int {

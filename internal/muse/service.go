@@ -22,7 +22,7 @@ import (
 
 var (
 	ErrLoggedOut         = errors.New("Log in to muse.ai in the window that just opened, then try again.")
-	ErrUnknownChat       = errors.New("unknown chat_id: only chats started by muse-mcp can be continued; start a new chat")
+	ErrUnknownChat       = errors.New("unknown chat_id: muse-mcp only continues or deletes chats it started")
 	ErrAwaitingApproval  = errors.New("this chat is waiting for an approval decision; call muse_decide_approval or wait for it to time out")
 	ErrNoSuchApproval    = errors.New("no such pending approval (the server may have restarted)")
 	ErrApprovalTimedOut  = errors.New("already denied (timed out)")
@@ -247,6 +247,48 @@ func (s *Service) Decide(ctx context.Context, chatID, approvalID string, approve
 	p.cw.Resume(s.o.Now())
 	return s.runChat(ctx, chatID, p.tab, p.chat, p.cw)
 }
+
+// DeleteChat deletes a chat this server started, in muse and in chats.json.
+// It refuses any other chat, and one waiting for an approval decision.
+func (s *Service) DeleteChat(ctx context.Context, chatID string) error {
+	s.call.Lock()
+	defer s.call.Unlock()
+	defer s.setActive(nil)
+	s.sync()
+	if !s.o.Chats.Known(chatID) {
+		return ErrUnknownChat
+	}
+	s.mu.Lock()
+	_, waiting := s.pending[chatID]
+	s.mu.Unlock()
+	if waiting {
+		return ErrAwaitingApproval
+	}
+	s.dropTab(chatID)
+	t, err := s.newTab(ctx)
+	if err != nil {
+		return err
+	}
+	defer t.cancel()
+	s.setActive(t)
+	if _, err := s.open(ctx, t, musepage.ThreadURL(s.o.BaseURL, chatID)); err != nil {
+		return err
+	}
+	op, release := bind(ctx, t.ctx)
+	err = musepage.DeleteOpenChat(op, chatID)
+	release()
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return err
+	}
+	s.o.Log.Info("chat deleted", "chat", chatID)
+	return s.o.Chats.Remove(chatID)
+}
+
+// ListChats lists the chats this server started, oldest first.
+func (s *Service) ListChats() []chats.Chat { return s.o.Chats.List() }
 
 // Login opens muse.ai. If it shows its login page, Chrome becomes visible and
 // Login waits until the owner has logged in and the window is hidden again.

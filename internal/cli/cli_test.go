@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dtthaison/muse-mcp/internal/chats"
 	"github.com/dtthaison/muse-mcp/internal/library"
 	"github.com/dtthaison/muse-mcp/internal/muse"
 	"github.com/dtthaison/muse-mcp/internal/output"
@@ -33,7 +34,18 @@ type fakeService struct {
 	logins    int
 	result    muse.Result // returned by GenerateImage and Chat
 	closed    bool
+	deleted   []string
 }
+
+func (f *fakeService) DeleteChat(_ context.Context, id string) error {
+	if id == "theirs" {
+		return muse.ErrUnknownChat
+	}
+	f.deleted = append(f.deleted, id)
+	return nil
+}
+
+func (f *fakeService) ListChats() []chats.Chat { return nil }
 
 func (f *fakeService) GenerateImage(_ context.Context, r muse.ImageRequest) (muse.Result, error) {
 	f.images = append(f.images, r)
@@ -68,13 +80,14 @@ type harness struct {
 	served      bool
 	home, dir   string
 	claudeErr   func(args []string) error
+	chats       *chats.Registry
 }
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	return &harness{svc: &fakeService{result: muse.Result{Status: "done", ChatID: "c1", ChatURL: "https://muse.ai/thread/c1", Reply: "Here you go."}},
 		lib: library.Open(filepath.Join(t.TempDir(), "library")), voices: voices.Open(filepath.Join(t.TempDir(), "voices.csv")),
-		home: t.TempDir(), dir: t.TempDir()}
+		home: t.TempDir(), dir: t.TempDir(), chats: chats.Load(filepath.Join(t.TempDir(), "chats.json"))}
 }
 
 func (h *harness) run(stdin string, interactive bool, args ...string) int {
@@ -82,7 +95,7 @@ func (h *harness) run(stdin string, interactive bool, args ...string) int {
 	h.errOut.Reset()
 	return Run(context.Background(), args, Env{
 		Stdin: strings.NewReader(stdin), Stdout: &h.out, Stderr: &h.errOut, Interactive: interactive,
-		Library: h.lib, Voices: h.voices,
+		Library: h.lib, Voices: h.voices, Chats: h.chats,
 		Muse: func() (Service, func(), error) {
 			return h.svc, func() { h.svc.closed = true }, nil
 		},
@@ -500,5 +513,43 @@ func TestInstallCopiesSkills(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(projDir, "SKILL.md")); err != nil {
 		t.Fatalf("project skill removed by a user-scope uninstall: %v", err)
+	}
+}
+
+func TestChatsList(t *testing.T) {
+	h := newHarness(t)
+	if code := h.run("", true, "chats"); code != 0 || !strings.Contains(h.out.String(), "No chats") {
+		t.Fatalf("code %d out %q", code, h.out.String())
+	}
+	for _, id := range []string{"aaa", "bbb"} {
+		if err := h.chats.Add(id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if code := h.run("", true, "chats"); code != 0 {
+		t.Fatalf("code %d: %s", code, h.errOut.String())
+	}
+	out := h.out.String()
+	if !strings.Contains(out, "aaa") || !strings.Contains(out, "bbb") || strings.Index(out, "aaa") > strings.Index(out, "bbb") {
+		t.Fatalf("out %q", out)
+	}
+	if h.svc.closed {
+		t.Fatal("listing chats started Chrome")
+	}
+}
+
+func TestChatsDelete(t *testing.T) {
+	h := newHarness(t)
+	if code := h.run("", true, "chats", "delete", "aaa", "bbb"); code != 0 {
+		t.Fatalf("code %d: %s", code, h.errOut.String())
+	}
+	if len(h.svc.deleted) != 2 || !strings.Contains(h.out.String(), "Deleted chat bbb") {
+		t.Fatalf("deleted %v out %q", h.svc.deleted, h.out.String())
+	}
+	if code := h.run("", true, "chats", "delete", "theirs"); code != 1 || !strings.Contains(h.errOut.String(), "only continues or deletes") {
+		t.Fatalf("code %d err %q", code, h.errOut.String())
+	}
+	if code := h.run("", true, "chats", "delete"); code != 2 {
+		t.Fatalf("no ids: code %d", code)
 	}
 }
