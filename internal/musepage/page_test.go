@@ -204,6 +204,31 @@ func TestOddApproveLabel(t *testing.T) {
 	}
 }
 
+// A "A task needs review" card has a button that is neither approve nor deny: Decide reports the
+// approval card, whichever way it is asked, and presses nothing.
+func TestReviewCardIsReportedAndNeverClicked(t *testing.T) {
+	ctx, _ := openChat(t)
+	if err := Send(ctx, "[fake:approval-review]"); err != nil {
+		t.Fatal(err)
+	}
+	s := until(t, ctx, "approval card", func(s State) bool { return s.Approval != nil })
+	if s.Approval.Text == "" || !strings.Contains(s.Approval.Text, "A task needs review") {
+		t.Fatalf("card text %q", s.Approval.Text)
+	}
+	for _, approve := range []bool{true, false} {
+		err := Decide(ctx, approve)
+		if !errors.Is(err, ErrNoButton) || !strings.Contains(err.Error(), "approval card") {
+			t.Fatalf("approve=%v: err = %v", approve, err)
+		}
+	}
+	if clicks, err := chromedp.Run(ctx, chromedp.Evaluate[int](`window.cardClicks`)); err != nil || clicks != 0 {
+		t.Fatalf("card buttons pressed %d times, err %v", clicks, err)
+	}
+	if s, err := Snapshot(ctx); err != nil || s.Approval == nil {
+		t.Fatalf("card gone: %+v %v", s, err)
+	}
+}
+
 func TestDecidedCardNotPending(t *testing.T) {
 	ctx, _ := openChat(t)
 	if err := Send(ctx, "[fake:approval-sticky]"); err != nil {

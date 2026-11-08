@@ -17,6 +17,7 @@ import (
 	"github.com/dtthaison/muse-mcp/internal/chats"
 	"github.com/dtthaison/muse-mcp/internal/library"
 	"github.com/dtthaison/muse-mcp/internal/muse"
+	"github.com/dtthaison/muse-mcp/internal/musepage"
 	"github.com/dtthaison/muse-mcp/internal/output"
 	"github.com/dtthaison/muse-mcp/internal/voices"
 	"github.com/dtthaison/muse-mcp/skills"
@@ -31,6 +32,7 @@ type fakeService struct {
 	images    []muse.ImageRequest
 	chats     []muse.ChatRequest
 	decisions []decision
+	decideErr error // returned by Decide, with a zero Result
 	logins    int
 	result    muse.Result // returned by GenerateImage and Chat
 	closed    bool
@@ -59,6 +61,9 @@ func (f *fakeService) Chat(_ context.Context, r muse.ChatRequest) (muse.Result, 
 
 func (f *fakeService) Decide(_ context.Context, chatID, approvalID string, approve bool) (muse.Result, error) {
 	f.decisions = append(f.decisions, decision{chatID, approvalID, approve})
+	if f.decideErr != nil {
+		return muse.Result{}, f.decideErr
+	}
 	return muse.Result{Status: "done", ChatID: chatID, Reply: "decided"}, nil
 }
 
@@ -240,7 +245,7 @@ func TestApprovalAskedInTerminal(t *testing.T) {
 	for _, tc := range []struct {
 		answer  string
 		approve bool
-	}{{"y\n", true}, {"yes\n", true}, {"n\n", false}, {"\n", false}, {"", false}} {
+	}{{"y\n", true}, {"yes\n", true}, {"n\n", false}, {"\n", false}} {
 		h := newHarness(t)
 		h.svc.result = approvalResult()
 		if code := h.run(tc.answer, true, "chat", "post it"); code != 0 {
@@ -252,6 +257,38 @@ func TestApprovalAskedInTerminal(t *testing.T) {
 		if !strings.Contains(h.errOut.String(), "Post to Facebook") {
 			t.Fatalf("%q: stderr %q", tc.answer, h.errOut.String())
 		}
+	}
+}
+
+// A closed stdin (a pipe, /dev/null) is no answer: nothing is clicked, not even Deny.
+func TestNoAnswerIsNotADecision(t *testing.T) {
+	h := newHarness(t)
+	h.svc.result = approvalResult()
+	if code := h.run("", true, "speech", "Guten Tag"); code != 3 || len(h.svc.decisions) != 0 {
+		t.Fatalf("code=%d decisions=%+v", code, h.svc.decisions)
+	}
+	if !strings.Contains(h.errOut.String(), "approval card") {
+		t.Fatalf("stderr %q", h.errOut.String())
+	}
+}
+
+// muse's "A task needs review" card has a button that is neither approve nor deny. The command
+// reports the approval card and exits 3, as it does without a terminal, instead of "no matching button".
+func TestUnansweredReviewCardIsReported(t *testing.T) {
+	h := newHarness(t)
+	h.svc.result = muse.Result{Status: "needs_approval", ChatID: "c1", ChatURL: "https://muse.ai/thread/c1",
+		Approval: &muse.PendingApproval{ChatID: "c1", ID: "c1-1", Text: "A task needs review"}}
+	h.svc.decideErr = musepage.ErrNoButton
+	if code := h.run("n\n", true, "speech", "Guten Tag"); code != 3 {
+		t.Fatalf("code=%d stderr=%q", code, h.errOut.String())
+	}
+	for _, want := range []string{"approval card", "A task needs review", "https://muse.ai/thread/c1"} {
+		if !strings.Contains(h.errOut.String(), want) {
+			t.Fatalf("stderr lacks %q: %q", want, h.errOut.String())
+		}
+	}
+	if strings.Contains(h.errOut.String(), "no matching button") {
+		t.Fatalf("stderr %q", h.errOut.String())
 	}
 }
 

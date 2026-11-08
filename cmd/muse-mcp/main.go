@@ -63,10 +63,9 @@ func run() int {
 	}
 	home, _ := os.UserHomeDir()
 	dir, _ := os.Getwd()
-	fi, _ := os.Stdin.Stat()
 	return cli.Run(ctx, os.Args[1:], cli.Env{
 		Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,
-		Interactive: fi != nil && fi.Mode()&os.ModeCharDevice != 0,
+		Interactive: isTerminal(os.Stdin),
 		Library:     lib,
 		Voices:      cat,
 		Chats:       chats.Load(paths.Chats),
@@ -163,3 +162,14 @@ func (u unavailable) Status(context.Context) (muse.StatusInfo, error) {
 }
 func (u unavailable) DeleteChat(context.Context, string) error { return u.err }
 func (u unavailable) ListChats() []chats.Chat                  { return u.chats.List() }
+
+// isTerminal reports whether f is a terminal a person can answer at. /dev/null is a character
+// device too, but a script that runs muse-mcp with it as stdin has nobody to ask.
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+		return false
+	}
+	null, err := os.Stat(os.DevNull)
+	return err != nil || !os.SameFile(fi, null)
+}

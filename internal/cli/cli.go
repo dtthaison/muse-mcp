@@ -501,20 +501,29 @@ func (r *runner) chat(ctx context.Context, args []string) int {
 	})
 }
 
-// finish asks the owner about any approvals, then prints the result.
+// finish asks the owner about any approvals, then prints the result. An approval nobody can
+// answer (no terminal, no answer typed, or a card whose buttons are neither approve nor deny, such
+// as "A task needs review") stays unanswered in muse: it is reported as an approval card and the
+// command exits 3. Nothing is clicked on the owner's behalf.
 func (r *runner) finish(ctx context.Context, svc Service, res muse.Result, err error, asJSON bool) int {
 	for err == nil && res.Status == "needs_approval" && res.Approval != nil {
 		a := res.Approval
 		fmt.Fprintf(r.env.Stderr, "muse asks to: %s\n", a.Text)
 		if !r.env.Interactive {
-			fmt.Fprintf(r.env.Stderr, "Not deciding without a terminal; it stays unanswered. Decide it in muse.ai: %s\n", res.ChatURL)
-			r.print(res, asJSON)
-			return exitUndecided
+			return r.undecided(res, asJSON, "Not deciding without a terminal")
 		}
 		fmt.Fprint(r.env.Stderr, "Approve? [y/N] ")
-		line, _ := r.in.ReadString('\n')
+		line, readErr := r.in.ReadString('\n')
 		answer := strings.ToLower(strings.TrimSpace(line))
-		res, err = svc.Decide(ctx, a.ChatID, a.ID, answer == "y" || answer == "yes")
+		if readErr != nil && answer == "" {
+			fmt.Fprintln(r.env.Stderr)
+			return r.undecided(res, asJSON, "No answer was given")
+		}
+		next, decideErr := svc.Decide(ctx, a.ChatID, a.ID, answer == "y" || answer == "yes")
+		if errors.Is(decideErr, musepage.ErrNoButton) {
+			return r.undecided(res, asJSON, "This approval card has no button muse-mcp may press")
+		}
+		res, err = next, decideErr
 	}
 	if err != nil {
 		var refused muse.RefusedError
@@ -530,6 +539,13 @@ func (r *runner) finish(ctx context.Context, svc Service, res muse.Result, err e
 		return exitErr
 	}
 	return exitOK
+}
+
+// undecided reports an approval card left unanswered and returns exitUndecided.
+func (r *runner) undecided(res muse.Result, asJSON bool, why string) int {
+	fmt.Fprintf(r.env.Stderr, "%s; the approval card stays unanswered. Decide it in muse.ai: %s\n", why, res.ChatURL)
+	r.print(res, asJSON)
+	return exitUndecided
 }
 
 func (r *runner) print(res muse.Result, asJSON bool) {

@@ -18,7 +18,7 @@
   Offline stand-in for muse.ai. It uses the same selectors muse-mcp relies on
   (see internal/musepage/page.go). Keywords in a message pick a scenario:
   [fake:image] [fake:textonly] [fake:textonly-then-image] [fake:approval]
-  [fake:approval-oddlabel] [fake:approval-sticky] [fake:send-trap] [fake:chat]
+  [fake:approval-oddlabel] [fake:approval-review] [fake:approval-sticky] [fake:send-trap] [fake:chat]
   [fake:slow] [fake:echo-attachments] [fake:video] [fake:textonly-video]
   [fake:decor-video] [fake:voice] [fake:voices]
   The chat switcher opens a side-chats panel like muse's: the open chat's
@@ -231,18 +231,22 @@ function voiceClip() {
 }
 
 // sticky: the decided card stays in the chat with its buttons disabled.
-function approvalCard(approveLabel, onApprove, onDeny, sticky) {
+// window.cardClicks counts every press of a card button, so a test can prove none happened.
+window.cardClicks = 0;
+function approvalCard(approveLabel, onApprove, onDeny, sticky, text, denyLabel) {
   const card = document.createElement('div');
   card.setAttribute('data-testid', 'hatch-inline-approval-card');
   const t = document.createElement('span');
-  t.textContent = 'Upload image to Page album';
+  t.textContent = text || 'Upload image to Page album';
   card.appendChild(t);
   const buttons = [];
-  for (const [label, fn] of [[approveLabel, onApprove], ['Deny', onDeny]]) {
+  for (const [label, fn] of [[approveLabel, onApprove], [denyLabel === undefined ? 'Deny' : denyLabel, onDeny]]) {
+    if (!label) continue;
     const b = document.createElement('button');
     b.textContent = label;
     b.setAttribute('aria-label', label);
     b.addEventListener('click', async () => {
+      window.cardClicks++;
       if (sticky) buttons.forEach(x => x.disabled = true); else card.remove();
       await fn();
       setBusy(false);
@@ -288,6 +292,11 @@ async function respond(text, names) {
         async () => { bubble('Okay, not uploading.'); await image(); },
         scenario === 'approval-sticky');
       return; // stays busy until decided
+    case 'approval-review':
+      // muse's "A task needs review" card: one button that is neither an approve nor a deny label.
+      bubble('I need a review first.');
+      approvalCard('Review task', async () => {}, async () => {}, false, 'A task needs review', '');
+      return;
     case 'send-trap':
       // A card whose approve button mentions "send": clicking it is an approval.
       bubble('May I email this?');
