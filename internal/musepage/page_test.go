@@ -229,6 +229,25 @@ func TestReviewCardIsReportedAndNeverClicked(t *testing.T) {
 	}
 }
 
+// muse's "A task needs review" summary for a task in another chat is not this chat's approval:
+// the chat's own result still arrives, and the summary is never reported or pressed.
+func TestBackgroundReviewCardIgnored(t *testing.T) {
+	ctx, _ := openChat(t)
+	if err := Send(ctx, "[fake:background-review]"); err != nil {
+		t.Fatal(err)
+	}
+	s := until(t, ctx, "image", func(s State) bool { return len(s.Images) > 0 })
+	if s.Approval != nil {
+		t.Fatalf("background card reported as an approval: %+v", s.Approval)
+	}
+	if n, err := chromedp.Run(ctx, chromedp.Evaluate[int](`document.querySelectorAll('[data-hatch-background-approval-surface]').length`)); err != nil || n != 1 {
+		t.Fatalf("fake background card missing: %d %v", n, err)
+	}
+	if clicks, err := chromedp.Run(ctx, chromedp.Evaluate[int](`window.cardClicks`)); err != nil || clicks != 0 {
+		t.Fatalf("card buttons pressed %d times, err %v", clicks, err)
+	}
+}
+
 func TestDecidedCardNotPending(t *testing.T) {
 	ctx, _ := openChat(t)
 	if err := Send(ctx, "[fake:approval-sticky]"); err != nil {

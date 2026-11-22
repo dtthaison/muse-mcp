@@ -297,6 +297,20 @@ async function respond(text, names) {
       bubble('I need a review first.');
       approvalCard('Review task', async () => {}, async () => {}, false, 'A task needs review', '');
       return;
+    case 'background-review': {
+      // muse's summary card for a task in another chat that waits for approval: it shows in every
+      // chat, while this chat's own work carries on.
+      const bg = document.createElement('div');
+      bg.setAttribute('data-testid', 'hatch-inline-approval-card');
+      bg.setAttribute('data-hatch-background-approval-surface', 'true');
+      bg.innerHTML = '<p>A task needs review</p><button>Review</button>';
+      bg.querySelector('button').addEventListener('click', () => window.cardClicks++);
+      document.body.appendChild(bg);
+      await sleep(500);
+      bubble('Here is your image.');
+      await image();
+      break;
+    }
     case 'send-trap':
       // A card whose approve button mentions "send": clicking it is an approval.
       bubble('May I email this?');

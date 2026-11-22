@@ -39,9 +39,13 @@ const (
 	titlePlaceholder = "Thread"
 	selAttachment    = `[data-testid^="hatch-chat-attachment-presentation-"]`
 	selPlay          = `button[aria-label="Play"]`
-	selApprovalCard  = `[data-testid="hatch-inline-approval-card"]`
-	selFileInput     = `input[type="file"]`
-	selRemoveChip    = `button[aria-label="Remove attachment"]`
+	// An approval card in this chat. muse also puts a summary card ("A task
+	// needs review") above the composer of every chat while any task, in any
+	// chat, waits for approval; it carries data-hatch-background-approval-surface
+	// and is not this chat's approval, so it is left out.
+	selApprovalCard = `[data-testid="hatch-inline-approval-card"]:not([data-hatch-background-approval-surface="true"])`
+	selFileInput    = `input[type="file"]`
+	selRemoveChip   = `button[aria-label="Remove attachment"]`
 	// The chat switcher opens the side-chats panel. The open chat's row has
 	// aria-current="page"; its "More thread actions" button (Pin, Rename,
 	// Archive, Delete) only shows while the mouse is over the row, so it is
