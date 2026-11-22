@@ -116,9 +116,12 @@ document.querySelector('[data-testid="hatch-chat-switcher-trigger"]').addEventLi
   if (id) sideRow(document.getElementById('chat-title').textContent, id, true);
 });
 
-fileInput.addEventListener('change', () => {
+window.attachedFiles = [];
+fileInput.addEventListener('change', async () => {
   for (const f of fileInput.files) {
     attached.push(f.name);
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    window.attachedFiles.push({name: f.name, type: f.type, size: f.size, sum: bytes.reduce((a, b) => (a * 31 + b) >>> 0, 0)});
     const b = document.createElement('button');
     b.setAttribute('aria-label', 'Remove attachment');
     b.textContent = 'x ' + f.name;

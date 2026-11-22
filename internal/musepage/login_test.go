@@ -60,6 +60,8 @@ func TestLoginSnapshotUnusualScreens(t *testing.T) {
 		// muse.ai's landing page says "your agent"; that is not "your age".
 		{"landing page text", email + `<p>Every Muse user shares a computer with your agent.</p>`, StepEmail, false},
 		{"use phone or email button", `<p>Log in or create an account</p><button>Use phone or email</button>`, StepChoose, false},
+		{"recaptcha", `<p>Complete the reCAPTCHA</p>` + email, StepEmail, true},
+		{"use phone or email behind a security check", `<p>Please complete the security check</p><button>Use phone or email</button>`, StepChoose, true},
 		{"use phone or email beside the box", email + `<button>Use phone or email</button>`, StepEmail, false},
 		{"your age", `<p>Confirm your age</p><button>Next</button>`, StepOther, true},
 	} {

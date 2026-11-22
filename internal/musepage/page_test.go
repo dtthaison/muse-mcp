@@ -264,6 +264,100 @@ func TestAttachWhileComposerPaused(t *testing.T) {
 	}
 }
 
+// The page gets each file's exact bytes and a MIME type, an empty file included.
+func TestAttachSendsBytes(t *testing.T) {
+	ctx, _ := openChat(t)
+	dir := t.TempDir()
+	big := make([]byte, (512<<10)*2+123) // crosses chunk boundaries
+	for i := range big {
+		big[i] = byte(i * 7)
+	}
+	want := map[string][]byte{"big.bin": big, "empty.txt": {}, "pic.png": []byte("\x89PNG\r\n\x1a\nrest")}
+	var files []string
+	for _, n := range []string{"big.bin", "empty.txt", "pic.png"} {
+		p := filepath.Join(dir, n)
+		if err := os.WriteFile(p, want[n], 0o600); err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, p)
+	}
+	if err := Attach(ctx, files); err != nil {
+		t.Fatal(err)
+	}
+	type got struct {
+		Name string `json:"name"`
+		Type string `json:"type"`
+		Size int    `json:"size"`
+		Sum  uint32 `json:"sum"`
+	}
+	var list []got
+	deadline := time.Now().Add(5 * time.Second)
+	for len(list) < 3 && time.Now().Before(deadline) {
+		l, err := chromedp.Run(ctx, chromedp.Evaluate[[]got](`window.attachedFiles`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		list = l
+		time.Sleep(100 * time.Millisecond)
+	}
+	if len(list) != 3 {
+		t.Fatalf("page got %d files", len(list))
+	}
+	for i, g := range list {
+		w := want[g.Name]
+		var sum uint32
+		for _, b := range w {
+			sum = sum*31 + uint32(b)
+		}
+		if filepath.Base(files[i]) != g.Name || g.Size != len(w) || g.Sum != sum {
+			t.Errorf("file %d: got %+v, want %s (%d bytes, sum %d)", i, g, filepath.Base(files[i]), len(w), sum)
+		}
+	}
+	if list[2].Type != "image/png" || list[0].Type == "" {
+		t.Errorf("types: %+v", list)
+	}
+}
+
+// Send never presses a button inside muse's background summary card, even one labelled send.
+func TestSendSkipsBackgroundCard(t *testing.T) {
+	ctx, _ := openChat(t)
+	js := `(() => {
+	  const bg = document.createElement('div');
+	  bg.setAttribute('data-testid', 'hatch-inline-approval-card');
+	  bg.setAttribute('data-hatch-background-approval-surface', 'true');
+	  bg.innerHTML = '<button aria-label="Send email">Send email</button>';
+	  bg.querySelector('button').addEventListener('click', () => window.cardClicks++);
+	  const ta = document.querySelector('textarea');
+	  ta.parentElement.insertBefore(bg, ta.parentElement.firstChild);
+	  return true;
+	})()`
+	if _, err := chromedp.Run(ctx, chromedp.Evaluate[bool](js)); err != nil {
+		t.Fatal(err)
+	}
+	if err := Send(ctx, "[fake:image]"); err != nil {
+		t.Fatal(err)
+	}
+	if clicks, err := chromedp.Run(ctx, chromedp.Evaluate[int](`window.cardClicks`)); err != nil || clicks != 0 {
+		t.Fatalf("background card pressed %d times, err %v", clicks, err)
+	}
+}
+
+func TestAttachTooBig(t *testing.T) {
+	ctx, _ := openChat(t)
+	p := filepath.Join(t.TempDir(), "huge.bin")
+	f, err := os.Create(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(100<<20 + 1); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	if err := Attach(ctx, []string{p}); err == nil || !strings.Contains(err.Error(), "at most") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestDecidedCardNotPending(t *testing.T) {
 	ctx, _ := openChat(t)
 	if err := Send(ctx, "[fake:approval-sticky]"); err != nil {

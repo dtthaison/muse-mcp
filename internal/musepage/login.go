@@ -35,7 +35,7 @@ const (
 
 // Word boundaries matter: the landing page says "your agent", which contains
 // "your age".
-const blockers = `\b(?:birthday|birth date|date of birth|how old|your age|captcha|security check|verify you.re human|are you a robot)\b`
+const blockers = `\b(?:birthday|birth date|date of birth|how old|your age|captcha|recaptcha|security check|verify you.re human|are you a robot)\b`
 
 var (
 	codeScreenRE = regexp.MustCompile(`(?i)enter (your|the) code|confirmation code`)
@@ -144,6 +144,7 @@ func LoginSnapshot(ctx context.Context) (LoginPage, error) {
 		p.Step = StepMeta
 	case !raw.Email && hasUseEmail:
 		p.Step = StepChoose
+		p.Unusual = p.Unusual || blockerRE.MatchString(raw.Text)
 	case raw.Email:
 		// An email box beside a password box, a captcha and the like is not the
 		// plain email step: typing the email would not get the owner anywhere.

@@ -44,8 +44,11 @@ const (
 	// chat, waits for approval; it carries data-hatch-background-approval-surface
 	// and is not this chat's approval, so it is left out.
 	selApprovalCard = `[data-testid="hatch-inline-approval-card"]:not([data-hatch-background-approval-surface="true"])`
-	selFileInput    = `input[type="file"]`
-	selRemoveChip   = `button[aria-label="Remove attachment"]`
+	// Every approval card, the background summary included: Send never presses
+	// a button inside any of them.
+	selAnyApprovalCard = `[data-testid="hatch-inline-approval-card"]`
+	selFileInput       = `input[type="file"]`
+	selRemoveChip      = `button[aria-label="Remove attachment"]`
 	// The chat switcher opens the side-chats panel. The open chat's row has
 	// aria-current="page"; its "More thread actions" button (Pin, Rename,
 	// Archive, Delete) only shows while the mouse is over the row, so it is
@@ -222,6 +225,13 @@ func Attach(ctx context.Context, files []string) error {
 // attachChunk is how many bytes of a file go to the page per CDP call.
 const attachChunk = 512 << 10
 
+// Attachments are read whole and held in the page until they are set on the
+// input, so their size is capped well above what muse takes for a reference.
+const (
+	maxAttachFile  = 100 << 20
+	maxAttachTotal = 200 << 20
+)
+
 // putFiles reads the files here and hands their bytes to the page, which
 // builds File objects and sets them on muse's file input. CDP's
 // SetFileInputFiles takes paths on the browser's machine, so it fails when the
@@ -234,6 +244,19 @@ func putFiles(ctx context.Context, files []string) error {
 	}
 	if paused {
 		return ErrComposerPaused
+	}
+	var total int64
+	for _, path := range files {
+		fi, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+		if fi.Size() > maxAttachFile {
+			return fmt.Errorf("%s is %d MB; attachments can be at most %d MB each", filepath.Base(path), fi.Size()>>20, maxAttachFile>>20)
+		}
+		if total += fi.Size(); total > maxAttachTotal {
+			return fmt.Errorf("the attachments add up to more than %d MB", maxAttachTotal>>20)
+		}
 	}
 	if _, err := chromedp.Run(ctx, chromedp.Evaluate[bool](`(window.__museAttach = [], true)`)); err != nil {
 		return err
@@ -263,7 +286,11 @@ func putFiles(ctx context.Context, files []string) error {
 	if err != nil {
 		return err
 	}
-	if res != "ok" {
+	switch res {
+	case "ok":
+	case "paused":
+		return ErrComposerPaused
+	default:
 		return errors.New(res)
 	}
 	return nil
@@ -287,9 +314,11 @@ var setFilesJS = fmt.Sprintf(`(() => {
   delete window.__museAttach;
   const input = document.querySelector(%s);
   if (!input) return 'muse has no file input on this page';
+  if (input.disabled) return 'paused';
   const dt = new DataTransfer();
   for (const f of list) {
     const parts = f.parts.map(b => Uint8Array.from(atob(b), c => c.charCodeAt(0)));
+    f.parts = null;
     dt.items.add(new File(parts, f.name, {type: f.type}));
   }
   input.files = dt.files;
@@ -312,7 +341,7 @@ var clickSendJS = fmt.Sprintf(`(() => {
   if (b.disabled || b.getAttribute('aria-disabled') === 'true') return 'disabled';
   b.click();
   return 'clicked';
-})()`, q(selApprovalCard), q(selInput))
+})()`, q(selAnyApprovalCard), q(selInput))
 
 var inputEmptyJS = fmt.Sprintf(`!(document.querySelector(%s) || {value: ''}).value`, q(selInput))
 
