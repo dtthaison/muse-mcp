@@ -248,6 +248,22 @@ func TestBackgroundReviewCardIgnored(t *testing.T) {
 	}
 }
 
+// While an approval waits, muse disables the composer's file input: Attach says so instead of
+// waiting for chips that never come.
+func TestAttachWhileComposerPaused(t *testing.T) {
+	ctx, _ := openChat(t)
+	if _, err := chromedp.Run(ctx, chromedp.Evaluate[bool](`(document.querySelector('input[type=file]').disabled = true, true)`)); err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "a.png")
+	if err := os.WriteFile(f, []byte("\x89PNG\r\n\x1a\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Attach(ctx, []string{f}); !errors.Is(err, ErrComposerPaused) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestDecidedCardNotPending(t *testing.T) {
 	ctx, _ := openChat(t)
 	if err := Send(ctx, "[fake:approval-sticky]"); err != nil {

@@ -228,6 +228,13 @@ const attachChunk = 512 << 10
 // browser runs elsewhere (a cdp: URL or a provider such as ShardX); sending the
 // bytes works for a local and a remote browser alike.
 func putFiles(ctx context.Context, files []string) error {
+	paused, err := chromedp.Run(ctx, chromedp.Evaluate[bool](composerPausedJS))
+	if err != nil {
+		return err
+	}
+	if paused {
+		return ErrComposerPaused
+	}
 	if _, err := chromedp.Run(ctx, chromedp.Evaluate[bool](`(window.__museAttach = [], true)`)); err != nil {
 		return err
 	}
@@ -261,6 +268,16 @@ func putFiles(ctx context.Context, files []string) error {
 	}
 	return nil
 }
+
+// ErrComposerPaused: muse locks a chat's composer (and its file input) while
+// an approval in that chat waits for an answer.
+var ErrComposerPaused = errors.New("muse has paused this chat until its waiting approval is answered: allow or deny it in muse.ai, then try again")
+
+var composerPausedJS = fmt.Sprintf(`(() => {
+  if (document.querySelector('[data-hatch-composer-lock-status="true"]')) return true;
+  const input = document.querySelector(%s);
+  return !!(input && input.disabled);
+})()`, q(selFileInput))
 
 // setFilesJS turns window.__museAttach into Files on the file input and fires
 // the events muse listens for.
