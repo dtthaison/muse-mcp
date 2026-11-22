@@ -195,6 +195,15 @@ results.
   server relaunches Chrome **visible** on muse.ai and returns a clear error to
   Claude: "Log in to muse.ai in the window that just opened, then try again."
 - Once login is detected (polling), the server goes back to hidden mode.
+- `muse-mcp login` can type the owner's email and emailed PIN into that page
+  (`internal/muse/login.go`, page facts in `internal/musepage/login.go`). The
+  owner types both in the terminal; muse-mcp enters them in the login tab through
+  chromedp (insert-text for the email, key presses for the code, real clicks), so
+  it works for every browser kind. Only email and PIN are automated: a password,
+  birthday, captcha or security screen, or 60 s without progress, prints what the
+  page shows and falls back to the owner finishing by hand. The email and PIN are
+  never logged or stored. Without a terminal and without `--email`, login only
+  opens the page and waits.
 - If muse.ai turns out to block or misbehave in headless Chrome, fall back to a
   visible window positioned off-screen or minimised. This is the builder's call
   after testing. Hidden versus visible is a convenience, not a requirement.
@@ -225,7 +234,12 @@ results.
   binary: `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`, else
   `google-chrome` or `chromium` on `PATH`; override with the `MUSE_CHROME`
   environment variable.
-- No remote-debugging port: chromedp talks to Chrome over a pipe
+- Attached browsers (§4.3b): an account's browser can be a DevTools address or
+  a provider program instead of our own Chrome. muse-mcp then launches no
+  Chrome, never closes that browser (it drops the connection only), and
+  `SetVisible` changes nothing. `MUSE_CDP_URL` still replaces the browser of
+  whichever account is used, for one run.
+- No remote-debugging port of our own: chromedp talks to Chrome over a pipe
   (`--remote-debugging-pipe`), and `TestNoDebuggingPort` checks that Chrome
   writes no `DevToolsActivePort`.
 - A lock file in `~/.muse-mcp/` keeps a second `muse-mcp` (for example a second
@@ -237,6 +251,80 @@ results.
 - On a logged-out page, the relaunch from hidden to visible (§4.2) goes ahead
   even if approvals are pending. Logged out, nothing can be clicked anyway, and
   §4.4 covers losing them.
+
+### 4.3b Accounts and browser providers
+
+muse-mcp stays generic: it knows how to attach to a DevTools address, and how to
+run a program that finds one. It contains no code for any browser vendor.
+
+**Accounts.** `<root>/accounts.json` (root = `MUSE_MCP_HOME` or `~/.muse-mcp`,
+mode 0600): `{"default":"sg1","accounts":{"sg1":{"browser":"shardx:muse-sg-1"},"y":{"command":["some-tool","--flag","arg"]}}}`.
+Names match `[a-z0-9][a-z0-9_-]{0,31}`. No file means one implicit account named
+`default` with browser `local`, which is exactly the behavior before accounts;
+the implicit `default` also exists when the file doesn't list it. State is per
+account: `default` keeps `<root>/chrome-profile`, `chats.json` and `lock`; any
+other account uses `<root>/accounts/<name>/{chrome-profile,chats.json,lock}`.
+`library/`, `voices.csv` and the log stay shared. `muse-mcp accounts` lists,
+`accounts default N` sets the default, `accounts remove N` removes the entry
+only (never muse, the browser or the account's state directory). `login
+--account N --browser SPEC|--browser-cmd "…"` validates the spec, checks that
+the provider is installed, saves the account and then logs in.
+
+**Browser specs.** `local` (own Chrome, own profile); `cdp:<url>` (attach to that
+DevTools URL); `<name>:<arg>` (run `muse-browser-<name> -- <arg>` from `PATH`); a
+`command` array (from `--browser-cmd`, split with shell-like quoting, never run
+through a shell) with the same contract as a provider. `MUSE_CDP_URL`, if set,
+overrides the spec of the account in use.
+
+**Provider contract.**
+
+- `muse-browser-<name> --describe` prints one line and exits 0. `muse-mcp
+  browsers` runs it with a 3 s timeout; on failure the name is listed with
+  "(no description)".
+- Normal run: `muse-browser-<name> -- <arg>`. The `--` is always passed, so an
+  argument such as `setup`, `list` or `-x` can't be read as a provider command or
+  flag (a `--browser-cmd` command is run as written). stdin is a pipe, stdout is
+  piped, stderr is captured. The provider
+  prints the CDP URL (`http://host:port` or `ws://…/devtools/browser/…`) as the
+  first line of stdout, then keeps running (it may hold tunnels) until its stdin
+  reaches EOF or it gets SIGTERM.
+- muse-mcp waits up to 90 s for that line. On timeout, or an exit before it, the
+  error carries the provider's exit code and the last 20 lines of its stderr.
+- On disconnect, stop or `Close`, muse-mcp closes the provider's stdin, sends
+  SIGTERM (after a 200 ms moment for a provider that exits on EOF), waits up to
+  5 s, then SIGKILLs the provider's process group, and reaps it. The signals go
+  to the whole group, and also when the provider exited by itself first, so a
+  tunnel it left behind goes too. The provider runs in its own process group so
+  a Ctrl-C meant for muse-mcp doesn't kill it before muse-mcp has shut it down in
+  order. A dead connection, or a provider that has exited, makes the next call
+  run the provider again, since the CDP port may have changed. `NewTab(ctx)`
+  bounds the startup (waiting for the address, connecting) with its ctx, and
+  stops a half-started provider when ctx ends; once running, neither the
+  provider nor the connection is tied to the request's ctx.
+- muse-mcp never closes an attached browser; the connection is dropped,
+  `SetVisible` is a no-op, and the visible window is whoever's browser it is.
+- Unknown provider: `no browser provider "shardx": install muse-browser-shardx
+  (see README › External browsers), or run muse-mcp browsers to see what you have`.
+
+**Code.** `internal/accounts` (the file, name and spec validation),
+`internal/browser/spec.go` (specs, command splitting), `internal/browser/provider.go`
+(provider lifecycle, discovery), `internal/config` (`Paths.Account`).
+
+**One server, many accounts.** `tools.RegisterAccounts` takes a `ServiceSource`;
+every muse tool has an optional `account` input (empty = the default account).
+The server's source (`cmd/muse-mcp/pool.go`) reads `accounts.json` on each call
+and builds one browser and `muse.Service` per account on first use; each takes
+its account's lock lazily (`LockLater`), as before. An unknown account is a tool
+error that lists the known accounts. A browser that can't be set up (no Chrome,
+no such provider) makes that account's tools answer with the reason, while
+`muse_list_chats` still works; that answer is not cached, so installing the
+provider or fixing the account takes effect on the next call. An account whose
+browser was changed in `accounts.json` gets a new service (the old one is closed
+first, because both want the account's lock). After `Close` the pool builds
+nothing more. `muse_status` includes `account` and `browser`.
+The browser kinds are separate from the accounts: two accounts can't share a
+`chrome-profile`, but nothing stops two accounts from pointing at the same
+attached browser, which would mix their logins; don't.
 
 ### 4.4 Approvals
 
@@ -349,13 +437,17 @@ single Go file) so it can be tuned from live testing.
 
 | Tool | Inputs | Returns |
 |---|---|---|
-| `muse_status` | none | Chrome running, logged in, open/tracked chats, pending approvals |
+| `muse_status` | `account` (optional) | Chrome running, logged in, open/tracked chats, pending approvals |
 | `muse_generate_image` | `output_path` (required); `prompt` or `change` (at least one); `characters` (saved names, optional); `scene` (saved name, optional); `reference_images` (file paths, optional); `reference_notes` (optional); `aspect_ratio` (optional) | `status` (`done`/`needs_approval`), saved paths with size, muse's reply text, `chat_id`, any approval info |
 | `muse_chat` | `message` (required); `chat_id` (optional); `attachments` (file paths, optional); `save_images_to` (directory, optional) | `status`, reply text, `chat_id`, saved image paths if muse sent images, approval info |
 | `muse_decide_approval` | `chat_id`, `approval_id`, `decision` | same shape as the call that hit the approval |
 | `muse_save_reference` | `name`, `kind`, `description`, `image_paths`; with `replace: true`, overwrite an existing entry | the stored entry |
 | `muse_list_references` | none | name, kind, description, image count |
 | `muse_delete_reference` | `name` | ok |
+
+Every muse tool (all but the reference and voice-catalog tools) also takes an
+optional `account` string: "muse account to use, from muse-mcp accounts; empty =
+the default account" (§4.3b).
 
 Tool descriptions are what Claude reads to choose tools. Each one should say
 when to use it, in particular: use saved references for recurring
@@ -376,6 +468,11 @@ reference, muse refused) come back as clear tool errors with a next step.
 - Page-logic tests: a local fake muse page (static HTML/JS in `testdata/` that
   mimics the selectors, the Stop button, delayed result images and an approval
   card) driven by real headless Chrome. CI-safe, no network.
+- Account and provider tests: `accounts.json` load/save/validation, spec parsing,
+  provider discovery on a temporary `PATH` with a fake `muse-browser-fake` shell
+  script, the provider lifecycle (start, stdin EOF, SIGTERM, SIGKILL, timeout,
+  early exit) and, with a real headless Chrome that has a debugging port, a full
+  attach, relaunch and `Close`. No real muse.ai or browser vendor is needed.
 - Live test, opt-in only (`MUSE_LIVE=1`): one text-to-image and one
   reference-image generation against the real account. Never runs by default,
   because it costs quota and adds chats to the owner's muse list.

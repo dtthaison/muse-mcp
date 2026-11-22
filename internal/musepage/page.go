@@ -1,6 +1,7 @@
 // Package musepage drives one muse.ai chat tab. Everything muse-mcp knows
 // about the muse.ai page (selectors, in-page scripts, text it looks for) lives
-// in this file, so a site change is a one-file fix. The facts were verified
+// in this package (this file for the chat, login.go for the login), so a site
+// change is a small fix. The facts were verified
 // against the live site on 2026-10-29; see docs/design.md §3.
 package musepage
 
@@ -10,7 +11,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"mime"
+	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -34,9 +40,16 @@ const (
 	titlePlaceholder = "Thread"
 	selAttachment    = `[data-testid^="hatch-chat-attachment-presentation-"]`
 	selPlay          = `button[aria-label="Play"]`
-	selApprovalCard  = `[data-testid="hatch-inline-approval-card"]`
-	selFileInput     = `input[type="file"]`
-	selRemoveChip    = `button[aria-label="Remove attachment"]`
+	// An approval card in this chat. muse also puts a summary card ("A task
+	// needs review") above the composer of every chat while any task, in any
+	// chat, waits for approval; it carries data-hatch-background-approval-surface
+	// and is not this chat's approval, so it is left out.
+	selApprovalCard = `[data-testid="hatch-inline-approval-card"]:not([data-hatch-background-approval-surface="true"])`
+	// Every approval card, the background summary included: Send never presses
+	// a button inside any of them.
+	selAnyApprovalCard = `[data-testid="hatch-inline-approval-card"]`
+	selFileInput       = `input[type="file"]`
+	selRemoveChip      = `button[aria-label="Remove attachment"]`
 	// The chat switcher opens the side-chats panel. The open chat's row has
 	// aria-current="page"; its "More thread actions" button (Pin, Rename,
 	// Archive, Delete) only shows while the mouse is over the row, so it is
@@ -194,7 +207,7 @@ func Attach(ctx context.Context, files []string) error {
 	if err != nil {
 		return err
 	}
-	if err := chromedp.Do(ctx, chromedp.SetUploadFiles(chromedp.CSS(selFileInput), files)); err != nil {
+	if err := putFiles(ctx, files); err != nil {
 		return fmt.Errorf("attaching files: %w", err)
 	}
 	deadline := time.Now().Add(15 * time.Second)
@@ -210,6 +223,129 @@ func Attach(ctx context.Context, files []string) error {
 	return fmt.Errorf("muse did not accept the %d attached file(s)", len(files))
 }
 
+// attachChunk is how many bytes of a file go to the page per CDP call.
+const attachChunk = 512 << 10
+
+// Attachments are read whole and held in the page until they are set on the
+// input, so their size is capped well above what muse takes for a reference.
+const (
+	maxAttachFile  = 100 << 20
+	maxAttachTotal = 200 << 20
+)
+
+// putFiles reads the files here and hands their bytes to the page, which
+// builds File objects and sets them on muse's file input. CDP's
+// SetFileInputFiles takes paths on the browser's machine, so it fails when the
+// browser runs elsewhere (a cdp: URL or a provider such as ShardX); sending the
+// bytes works for a local and a remote browser alike.
+func putFiles(ctx context.Context, files []string) error {
+	paused, err := chromedp.Run(ctx, chromedp.Evaluate[bool](composerPausedJS))
+	if err != nil {
+		return err
+	}
+	if paused {
+		return ErrComposerPaused
+	}
+	var total int64
+	for _, path := range files {
+		fi, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+		if fi.Size() > maxAttachFile {
+			return fmt.Errorf("%s is %d MB; attachments can be at most %d MB each", filepath.Base(path), fi.Size()>>20, maxAttachFile>>20)
+		}
+		if total += fi.Size(); total > maxAttachTotal {
+			return fmt.Errorf("the attachments add up to more than %d MB", maxAttachTotal>>20)
+		}
+	}
+	if _, err := chromedp.Run(ctx, chromedp.Evaluate[bool](`(window.__museAttach = [], true)`)); err != nil {
+		return err
+	}
+	for i, path := range files {
+		data, err := readCapped(path, maxAttachFile)
+		if err != nil {
+			return err
+		}
+		typ := mime.TypeByExtension(strings.ToLower(filepath.Ext(path)))
+		if typ == "" {
+			typ = http.DetectContentType(data)
+		}
+		head := fmt.Sprintf(`(window.__museAttach[%d] = {name: %s, type: %s, parts: []}, true)`, i, q(filepath.Base(path)), q(typ))
+		if _, err := chromedp.Run(ctx, chromedp.Evaluate[bool](head)); err != nil {
+			return err
+		}
+		for off := 0; off < len(data); off += attachChunk {
+			end := min(off+attachChunk, len(data))
+			js := fmt.Sprintf(`(window.__museAttach[%d].parts.push(%q), true)`, i, base64.StdEncoding.EncodeToString(data[off:end]))
+			if _, err := chromedp.Run(ctx, chromedp.Evaluate[bool](js)); err != nil {
+				return err
+			}
+		}
+	}
+	res, err := chromedp.Run(ctx, chromedp.Evaluate[string](setFilesJS))
+	if err != nil {
+		return err
+	}
+	switch res {
+	case "ok":
+	case "paused":
+		return ErrComposerPaused
+	default:
+		return errors.New(res)
+	}
+	return nil
+}
+
+// ErrComposerPaused: muse locks a chat's composer (and its file input) while
+// an approval in that chat waits for an answer.
+var ErrComposerPaused = errors.New("muse has paused this chat until its waiting approval is answered: allow or deny it in muse.ai, then try again")
+
+// Only the disabled file input says so: muse sets
+// data-hatch-composer-lock-status="true" on every chat, paused or not.
+var composerPausedJS = fmt.Sprintf(`(() => {
+  const input = document.querySelector(%s);
+  return !!(input && input.disabled);
+})()`, q(selFileInput))
+
+// readCapped reads a file but never more than limit bytes, even if the file
+// grew after its size was checked.
+func readCapped(path string, limit int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%s is larger than %d MB; attachments can be at most %d MB each", filepath.Base(path), limit>>20, limit>>20)
+	}
+	return data, nil
+}
+
+// setFilesJS turns window.__museAttach into Files on the file input and fires
+// the events muse listens for.
+var setFilesJS = fmt.Sprintf(`(() => {
+  const list = window.__museAttach || [];
+  delete window.__museAttach;
+  const input = document.querySelector(%s);
+  if (!input) return 'muse has no file input on this page';
+  if (input.disabled) return 'paused';
+  const dt = new DataTransfer();
+  for (const f of list) {
+    const parts = f.parts.map(b => Uint8Array.from(atob(b), c => c.charCodeAt(0)));
+    f.parts = null;
+    dt.items.add(new File(parts, f.name, {type: f.type}));
+  }
+  input.files = dt.files;
+  input.dispatchEvent(new Event('input', {bubbles: true}));
+  input.dispatchEvent(new Event('change', {bubbles: true}));
+  return 'ok';
+})()`, q(selFileInput))
+
 // clickSendJS looks for the send button near the chat box (muse's is within
 // 5 levels of the textarea), never inside an approval card: a card button
 // like "Send email" is an approval, not the composer.
@@ -224,7 +360,7 @@ var clickSendJS = fmt.Sprintf(`(() => {
   if (b.disabled || b.getAttribute('aria-disabled') === 'true') return 'disabled';
   b.click();
   return 'clicked';
-})()`, q(selApprovalCard), q(selInput))
+})()`, q(selAnyApprovalCard), q(selInput))
 
 var inputEmptyJS = fmt.Sprintf(`!(document.querySelector(%s) || {value: ''}).value`, q(selInput))
 
@@ -262,11 +398,27 @@ func Send(ctx context.Context, text string) error {
 			return err
 		}
 	}
+	// No send button to click: press Enter, but only in the chat box, so the
+	// key can never land on a focused approval-card button.
+	focused, err := chromedp.Run(ctx, chromedp.Evaluate[bool](focusInputJS))
+	if err != nil {
+		return err
+	}
+	if !focused {
+		return errors.New("muse chat box could not take the focus to send")
+	}
 	if err := chromedp.Do(ctx, chromedp.KeyEvent(kb.Enter)); err != nil {
 		return err
 	}
 	return waitEmpty(ctx)
 }
+
+var focusInputJS = fmt.Sprintf(`(() => {
+  const t = document.querySelector(%s);
+  if (!t) return false;
+  t.focus();
+  return document.activeElement === t;
+})()`, q(selInput))
 
 func waitEmpty(ctx context.Context) error {
 	deadline := time.Now().Add(3 * time.Second)

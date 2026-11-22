@@ -9,8 +9,10 @@ import (
 	"os"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/chromedp/chromedp"
+	"github.com/chromedp/chromedp/remote"
 )
 
 var ErrLocked = errors.New("another muse-mcp (another Claude Code session or a muse-mcp command) is using your muse login; use muse there or quit it, then try again")
@@ -22,6 +24,16 @@ type Options struct {
 	// LockLater takes the lock when Chrome first starts instead of in New,
 	// so a server that never uses muse doesn't keep others out.
 	LockLater bool
+	// Spec says where the browser comes from. The zero value starts Chrome
+	// from ExecPath. A KindCDP spec attaches to a browser that runs already
+	// (for example one reached through an SSH tunnel), and a KindProvider
+	// spec runs a provider program that prints the DevTools address. muse-mcp
+	// never closes an attached browser, and the window is whatever the owner
+	// of that browser shows, so SetVisible does not relaunch anything.
+	Spec Spec
+	// ProviderTimeout is how long to wait for a provider's DevTools address;
+	// zero means ProviderStartTimeout.
+	ProviderTimeout time.Duration
 }
 
 // Browser starts Chrome lazily and relaunches it when it has died or when the
@@ -36,6 +48,7 @@ type Browser struct {
 	cancelAlloc   context.CancelFunc
 	browserCtx    context.Context
 	cancelBrowser context.CancelFunc
+	prov          *provider // the running provider, for KindProvider specs
 }
 
 // New takes the profile lock, unless LockLater is set. It does not start
@@ -78,11 +91,11 @@ func (b *Browser) NewTab(ctx context.Context) (context.Context, context.CancelFu
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if err := b.ensureLocked(); err != nil {
+	if err := b.ensureLocked(ctx); err != nil {
 		return nil, nil, err
 	}
 	tab, cancel := chromedp.NewContext(b.browserCtx)
-	if err := chromedp.Do(tab); err != nil {
+	if err := connect(ctx, tab, cancel); err != nil {
 		cancel()
 		return nil, nil, fmt.Errorf("opening a Chrome tab: %w", err)
 	}
@@ -98,11 +111,11 @@ func (b *Browser) SetVisible(visible bool) error {
 		return nil
 	}
 	b.visible = visible
-	if !b.runningLocked() {
+	if b.opts.Spec.Attached() || !b.runningLocked() {
 		return nil
 	}
 	b.stopLocked()
-	return b.launchLocked()
+	return b.launchLocked(context.Background())
 }
 
 func (b *Browser) Visible() bool {
@@ -139,21 +152,61 @@ func (b *Browser) Close() error {
 	return err
 }
 
+// runningLocked reports whether the connection is up. A provider that has
+// exited (its tunnel dropped, say) counts as down even before the websocket
+// notices, so the next call tears the connection down and runs it again.
 func (b *Browser) runningLocked() bool {
-	return b.browserCtx != nil && b.browserCtx.Err() == nil
+	return b.browserCtx != nil && b.browserCtx.Err() == nil && (b.prov == nil || !b.prov.exited())
 }
 
-func (b *Browser) ensureLocked() error {
+func (b *Browser) ensureLocked(ctx context.Context) error {
 	if b.runningLocked() {
 		return nil
 	}
 	b.stopLocked()
-	return b.launchLocked()
+	return b.launchLocked(ctx)
 }
 
-func (b *Browser) launchLocked() error {
+// connect opens the connection browserCtx stands for, and gives up (cancelling
+// it) when ctx ends first. The connection is not tied to ctx afterwards: ctx
+// only bounds the time spent connecting.
+func connect(ctx, browserCtx context.Context, cancel context.CancelFunc) error {
+	stop := context.AfterFunc(ctx, cancel)
+	err := chromedp.Do(browserCtx)
+	if !stop() { // ctx ended while connecting; cancel may have run
+		return ctx.Err()
+	}
+	return err
+}
+
+// launchLocked starts or attaches to the browser. ctx bounds the startup only;
+// the browser and the provider outlive it.
+func (b *Browser) launchLocked(ctx context.Context) error {
 	if err := b.lockLocked(); err != nil {
 		return err
+	}
+	switch b.opts.Spec.Kind {
+	case KindCDP:
+		return b.attachLocked(ctx, b.opts.Spec.URL)
+	case KindProvider:
+		argv, err := b.opts.Spec.Argv()
+		if err != nil {
+			return err
+		}
+		timeout := b.opts.ProviderTimeout
+		if timeout == 0 {
+			timeout = ProviderStartTimeout
+		}
+		url, prov, err := startProvider(ctx, argv, timeout)
+		if err != nil {
+			return err
+		}
+		if err := b.attachLocked(ctx, url); err != nil {
+			prov.stop()
+			return err
+		}
+		b.prov = prov
+		return nil
 	}
 	// chromedp talks to Chrome over a pipe; a remote-debugging port or address
 	// flag would open a port other programs could attach to.
@@ -173,7 +226,7 @@ func (b *Browser) launchLocked() error {
 	}
 	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
 	browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
-	if err := chromedp.Do(browserCtx); err != nil {
+	if err := connect(ctx, browserCtx, cancelBrowser); err != nil {
 		cancelBrowser()
 		cancelAlloc()
 		return fmt.Errorf("starting Chrome (%s): %w", b.opts.ExecPath, err)
@@ -183,16 +236,41 @@ func (b *Browser) launchLocked() error {
 	return nil
 }
 
+// attachLocked connects to the browser at a DevTools address. ctx bounds the
+// connecting only.
+func (b *Browser) attachLocked(ctx context.Context, url string) error {
+	allocCtx, cancelAlloc := remote.NewAllocator(context.Background(), url)
+	browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
+	if err := connect(ctx, browserCtx, cancelBrowser); err != nil {
+		cancelBrowser()
+		cancelAlloc()
+		return fmt.Errorf("connecting to the browser at %s: %w", url, err)
+	}
+	b.cancelAlloc, b.browserCtx, b.cancelBrowser = cancelAlloc, browserCtx, cancelBrowser
+	b.gen++
+	return nil
+}
+
 func (b *Browser) stopLocked() {
 	if b.browserCtx == nil {
+		b.stopProviderLocked()
 		return
 	}
-	if b.browserCtx.Err() == nil {
+	// An attached browser belongs to someone else: drop the connection only.
+	if !b.opts.Spec.Attached() && b.browserCtx.Err() == nil {
 		chromedp.Cancel(b.browserCtx) // closes Chrome gracefully
 	}
 	b.cancelBrowser()
 	b.cancelAlloc()
 	b.browserCtx, b.cancelBrowser, b.cancelAlloc = nil, nil, nil
+	b.stopProviderLocked()
+}
+
+// stopProviderLocked shuts the provider down (stdin closed, SIGTERM, then
+// SIGKILL) and reaps it. The browser it pointed at is left alone.
+func (b *Browser) stopProviderLocked() {
+	b.prov.stop()
+	b.prov = nil
 }
 
 // pid is the Chrome process ID (0 when not running); used by tests.

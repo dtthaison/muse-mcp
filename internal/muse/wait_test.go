@@ -247,7 +247,8 @@ func TestDefaultTiming(t *testing.T) {
 	want := Timing{Poll: 1500 * time.Millisecond, Ready: 45 * time.Second, ImageTimeout: 4 * time.Minute,
 		ImageMax: 10 * time.Minute, ImageSettle: 3 * time.Second, TextOnlyGrace: 10 * time.Second,
 		ChatTimeout: 5 * time.Minute, ChatMax: 10 * time.Minute, ChatStable: 3 * time.Second,
-		ChatStuck: 2 * time.Minute, ApprovalTimeout: 10 * time.Minute, Unresponsive: 20 * time.Second, TitleWait: 10 * time.Second}
+		ChatStuck: 2 * time.Minute, ApprovalTimeout: 10 * time.Minute, Unresponsive: 20 * time.Second, TitleWait: 10 * time.Second,
+		LoginStall: time.Minute}
 	if d != want {
 		t.Fatalf("got %+v", d)
 	}

@@ -18,6 +18,10 @@ continue); `muse_list_chats` lists the chats muse-mcp started.
 
 ## Every request
 
+- Every muse tool takes an optional `account` (a name from `muse-mcp accounts`;
+  empty is the default account). Use it only when the owner names an account,
+  and keep the same account for a chat: a `chat_id` belongs to the account that
+  made it.
 - It uses the owner's muse quota and adds a chat to their muse list. Make
   what was asked; ask before making several variations.
 - `muse_delete_chat` deletes a chat muse-mcp started, for good. Delete when
