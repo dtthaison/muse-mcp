@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"mime"
 	"net/http"
 	"net/url"
@@ -262,7 +263,7 @@ func putFiles(ctx context.Context, files []string) error {
 		return err
 	}
 	for i, path := range files {
-		data, err := os.ReadFile(path)
+		data, err := readCapped(path, maxAttachFile)
 		if err != nil {
 			return err
 		}
@@ -306,6 +307,24 @@ var composerPausedJS = fmt.Sprintf(`(() => {
   const input = document.querySelector(%s);
   return !!(input && input.disabled);
 })()`, q(selFileInput))
+
+// readCapped reads a file but never more than limit bytes, even if the file
+// grew after its size was checked.
+func readCapped(path string, limit int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%s is larger than %d MB; attachments can be at most %d MB each", filepath.Base(path), limit>>20, limit>>20)
+	}
+	return data, nil
+}
 
 // setFilesJS turns window.__museAttach into Files on the file input and fires
 // the events muse listens for.
@@ -379,11 +398,27 @@ func Send(ctx context.Context, text string) error {
 			return err
 		}
 	}
+	// No send button to click: press Enter, but only in the chat box, so the
+	// key can never land on a focused approval-card button.
+	focused, err := chromedp.Run(ctx, chromedp.Evaluate[bool](focusInputJS))
+	if err != nil {
+		return err
+	}
+	if !focused {
+		return errors.New("muse chat box could not take the focus to send")
+	}
 	if err := chromedp.Do(ctx, chromedp.KeyEvent(kb.Enter)); err != nil {
 		return err
 	}
 	return waitEmpty(ctx)
 }
+
+var focusInputJS = fmt.Sprintf(`(() => {
+  const t = document.querySelector(%s);
+  if (!t) return false;
+  t.focus();
+  return document.activeElement === t;
+})()`, q(selInput))
 
 func waitEmpty(ctx context.Context) error {
 	deadline := time.Now().Add(3 * time.Second)
