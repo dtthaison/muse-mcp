@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -32,6 +33,40 @@ const loginPage = `<!doctype html><html><body><h1>Muse</h1><p>Log in or create a
   if ((await r.text()) === 'yes') location.href = '/thread/new';
 }, 300);</script></body></html>`
 
+// flowPage is muse's login as a terminal login sees it: an email step (with a
+// "Continue with Google" button that must not be pressed), then a code step
+// that refuses every code but the right one. The Continue button stays
+// disabled until the page has seen an input event, like a React form.
+const flowPage = `<!doctype html><html><body><div id="app"></div><script>
+const app = document.getElementById('app');
+const post = (path, body) => fetch(path, {method: 'POST', body}).then(r => r.text());
+function emailStep() {
+  app.innerHTML = '<h1>Muse</h1><p>Log in or create an account</p>' +
+    '<input id="email" placeholder="Mobile number or email (required)">' +
+    '<button id="google">Continue with Google</button><button id="go" disabled>Continue</button>';
+  let seen = '';
+  const box = document.getElementById('email'), go = document.getElementById('go');
+  box.addEventListener('input', () => { seen = box.value; go.disabled = seen === ''; });
+  go.addEventListener('click', async () => { await post('/__login/email', seen); codeStep(); });
+}
+function codeStep() {
+  app.innerHTML = '<p>Enter your code</p><input id="code" inputmode="numeric">' +
+    '<button id="submit" disabled>Continue</button><button id="resend">Resend code</button><p id="err"></p>';
+  let seen = '';
+  const box = document.getElementById('code'), go = document.getElementById('submit'), err = document.getElementById('err');
+  box.addEventListener('input', () => { seen = box.value; go.disabled = seen === ''; err.textContent = ''; });
+  go.addEventListener('click', async () => {
+    if ((await post('/__login/code', seen)) === 'ok') location.href = '/thread/new';
+    else err.textContent = "That code isn't right";
+  });
+  document.getElementById('resend').addEventListener('click', () => post('/__login/resend', ''));
+}
+emailStep();
+setInterval(async () => {
+  if ((await (await fetch('/__loggedin')).text()) === 'yes') location.href = '/thread/new';
+}, 300);
+</script></body></html>`
+
 // Server is an httptest server that answers every path with the fake page.
 type Server struct {
 	*httptest.Server
@@ -40,6 +75,12 @@ type Server struct {
 
 	mu      sync.Mutex
 	deleted []string
+
+	flow    bool // the login page is the email and code flow
+	goodPIN string
+	email   string
+	codes   []string
+	resends int
 }
 
 func New() *Server {
@@ -52,6 +93,26 @@ func New() *Server {
 			s.mu.Unlock()
 			return
 		}
+		if strings.HasPrefix(r.URL.Path, "/__login/") {
+			body, _ := io.ReadAll(r.Body)
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			switch r.URL.Path {
+			case "/__login/email":
+				s.email = string(body)
+			case "/__login/resend":
+				s.resends++
+			case "/__login/code":
+				s.codes = append(s.codes, string(body))
+				if string(body) == s.goodPIN {
+					s.loggedOut.Store(false)
+					w.Write([]byte("ok"))
+				} else {
+					w.Write([]byte("bad"))
+				}
+			}
+			return
+		}
 		if r.URL.Path == "/__loggedin" {
 			if s.loggedOut.Load() {
 				w.Write([]byte("no"))
@@ -62,7 +123,14 @@ func New() *Server {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if s.loggedOut.Load() {
-			w.Write([]byte(loginPage))
+			s.mu.Lock()
+			flow := s.flow
+			s.mu.Unlock()
+			if flow {
+				w.Write([]byte(flowPage))
+			} else {
+				w.Write([]byte(loginPage))
+			}
 			return
 		}
 		if r.URL.Path == "/thread/"+BrokenChat {
@@ -91,3 +159,33 @@ func (s *Server) Deleted() []string {
 
 // SetLoggedOut makes every page show muse's login screen instead of the chat.
 func (s *Server) SetLoggedOut(v bool) { s.loggedOut.Store(v) }
+
+// SetLoginFlow makes the login page the email and code flow, which accepts only
+// pin, and logs the page out. The flow records what the page was given.
+func (s *Server) SetLoginFlow(pin string) {
+	s.mu.Lock()
+	s.flow, s.goodPIN = true, pin
+	s.mu.Unlock()
+	s.loggedOut.Store(true)
+}
+
+// LoginEmail is the email the login flow's first step was submitted with.
+func (s *Server) LoginEmail() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.email
+}
+
+// LoginCodes lists the codes the login flow was given, in order.
+func (s *Server) LoginCodes() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.codes...)
+}
+
+// LoginResends counts the clicks on the login flow's "Resend code".
+func (s *Server) LoginResends() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.resends
+}

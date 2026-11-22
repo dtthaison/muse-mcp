@@ -195,6 +195,15 @@ results.
   server relaunches Chrome **visible** on muse.ai and returns a clear error to
   Claude: "Log in to muse.ai in the window that just opened, then try again."
 - Once login is detected (polling), the server goes back to hidden mode.
+- `muse-mcp login` can type the owner's email and emailed PIN into that page
+  (`internal/muse/login.go`, page facts in `internal/musepage/login.go`). The
+  owner types both in the terminal; muse-mcp enters them in the login tab through
+  chromedp (insert-text for the email, key presses for the code, real clicks), so
+  it works for every browser kind. Only email and PIN are automated: a password,
+  birthday, captcha or security screen, or 60 s without progress, prints what the
+  page shows and falls back to the owner finishing by hand. The email and PIN are
+  never logged or stored. Without a terminal and without `--email`, login only
+  opens the page and waits.
 - If muse.ai turns out to block or misbehave in headless Chrome, fall back to a
   visible window positioned off-screen or minimised. This is the builder's call
   after testing. Hidden versus visible is a convenience, not a requirement.

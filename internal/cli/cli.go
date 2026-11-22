@@ -31,7 +31,7 @@ import (
 // Service is what the commands need from muse.Service.
 type Service interface {
 	tools.Service
-	Login(ctx context.Context) error
+	Login(ctx context.Context, o muse.LoginOptions) error
 }
 
 // Env is everything Run touches outside itself.
@@ -67,9 +67,12 @@ Usage:
   muse-mcp                       run the MCP server (what Claude Code starts)
   muse-mcp install [--scope S]   add muse-mcp to Claude Code (scope user, project or local; default user)
   muse-mcp uninstall [--scope S] remove it from Claude Code
-  muse-mcp login [--account N] [--browser SPEC | --browser-cmd "CMD ARGS"]
-                                 open muse.ai and wait until you are logged in; with --browser
-                                 (or --browser-cmd) it first saves which browser account N uses
+  muse-mcp login [--account N] [--email E] [--browser SPEC | --browser-cmd "CMD ARGS"]
+                                 log in to muse.ai. In a terminal (or with --email) you type your
+                                 email and the PIN code muse emails you here and muse-mcp enters
+                                 them in the page; anything else muse asks, you finish in the
+                                 browser window. With --browser (or --browser-cmd) it first saves
+                                 which browser account N uses
   muse-mcp status                the browser, login and pending approvals
 
   muse-mcp accounts              the muse accounts and the browser each one uses
@@ -774,12 +777,15 @@ func (r *runner) refs(args []string) int {
 }
 
 // login saves the browser an account uses when asked to, then opens muse.ai
-// in it and waits for the owner to log in.
+// in it. In a terminal, or with --email, it types the email and the PIN code
+// the owner enters here into the page; otherwise it waits for the owner to log
+// in by hand.
 func (r *runner) login(ctx context.Context, args []string) int {
 	fs := r.newFlags("login")
 	account := r.accountFlag(fs)
 	spec := fs.String("browser", "", "browser SPEC: local, cdp:URL or NAME:ARG")
 	cmdline := fs.String("browser-cmd", "", "a provider command line, run without a shell")
+	email := fs.String("email", "", "your muse email; muse-mcp types it into the login page")
 	rest, err := parse(fs, args)
 	if err != nil {
 		return exitUsage
@@ -793,14 +799,44 @@ func (r *runner) login(ctx context.Context, args []string) int {
 			return r.fail(err)
 		}
 	}
-	return r.withMuse(name, func(svc Service) int {
-		fmt.Fprintln(r.env.Stderr, "Opening muse.ai. If a Chrome window appears, log in there.")
-		if err := svc.Login(ctx); err != nil {
+	var opts muse.LoginOptions
+	driven := r.env.Interactive || strings.TrimSpace(*email) != ""
+	if driven {
+		opts = muse.LoginOptions{Email: strings.TrimSpace(*email), Ask: r.ask,
+			Say: func(m string) { fmt.Fprintln(r.env.Stderr, m) }}
+	}
+	acct, err := r.resolve(name)
+	if err != nil {
+		return r.fail(err)
+	}
+	return r.withMuse(acct, func(svc Service) int {
+		if driven {
+			fmt.Fprintln(r.env.Stderr, "Opening muse.ai. If it asks for more than your email and a PIN code, finish in the Chrome window.")
+		} else {
+			fmt.Fprintln(r.env.Stderr, "Opening muse.ai. If a Chrome window appears, log in there.")
+		}
+		if err := svc.Login(ctx, opts); err != nil {
 			return r.fail(err)
 		}
-		fmt.Fprintln(r.env.Stdout, "Logged in to muse.ai.")
+		if driven {
+			fmt.Fprintf(r.env.Stdout, "Logged in as account %s.\n", acct)
+		} else {
+			fmt.Fprintln(r.env.Stdout, "Logged in to muse.ai.")
+		}
 		return exitOK
 	})
+}
+
+// ask prints prompt on stderr and reads one line from stdin. It fails when
+// stdin ends before an answer; an empty line is an answer.
+func (r *runner) ask(prompt string) (string, error) {
+	fmt.Fprint(r.env.Stderr, prompt)
+	line, err := r.in.ReadString('\n')
+	if err != nil && line == "" {
+		fmt.Fprintln(r.env.Stderr)
+		return "", err
+	}
+	return strings.TrimRight(line, "\r\n"), nil
 }
 
 // saveAccount creates or updates an account's browser. Without a name it is

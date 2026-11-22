@@ -35,7 +35,9 @@ type fakeService struct {
 	decisions []decision
 	decideErr error // returned by Decide, with a zero Result
 	logins    int
-	result    muse.Result // returned by GenerateImage and Chat
+	loginOpts []muse.LoginOptions
+	loginFn   func(muse.LoginOptions) error // runs inside Login
+	result    muse.Result                   // returned by GenerateImage and Chat
 	closed    bool
 	deleted   []string
 }
@@ -72,8 +74,12 @@ func (f *fakeService) Status(context.Context) (muse.StatusInfo, error) {
 	return muse.StatusInfo{ChromeRunning: true, LoggedIn: true, TrackedChats: 2, Pending: []muse.PendingApproval{}}, nil
 }
 
-func (f *fakeService) Login(context.Context) error {
+func (f *fakeService) Login(_ context.Context, o muse.LoginOptions) error {
 	f.logins++
+	f.loginOpts = append(f.loginOpts, o)
+	if f.loginFn != nil {
+		return f.loginFn(o)
+	}
 	return nil
 }
 
@@ -315,6 +321,100 @@ func TestTimeoutExitCode(t *testing.T) {
 	h.svc.result = muse.Result{Status: "timeout", ChatID: "c1", ChatURL: "https://muse.ai/thread/c1"}
 	if code := h.run("", true, "image", "-o", "x.png", "fox"); code != 1 || !strings.Contains(h.errOut.String(), "timed out") {
 		t.Fatalf("code=%d stderr=%q", code, h.errOut.String())
+	}
+}
+
+// In a terminal, login hands the service a way to ask for the email and the
+// PIN; the answers come from stdin and the prompts go to stderr.
+func TestLoginInTerminalAsksForEmailAndCode(t *testing.T) {
+	h := newHarness(t)
+	var got []string
+	h.svc.loginFn = func(o muse.LoginOptions) error {
+		if o.Email != "" || o.Ask == nil || o.Say == nil {
+			t.Fatalf("options %+v", o)
+		}
+		for _, p := range []string{"Muse email: ", "PIN code sent to a@b.c (empty = send a new one): ", "again: "} {
+			a, err := o.Ask(p)
+			got = append(got, a)
+			if err != nil {
+				got = append(got, "err")
+			}
+		}
+		o.Say("hello owner")
+		return nil
+	}
+	if code := h.run("a@b.c\n\n", true, "login"); code != 0 {
+		t.Fatalf("code=%d %q", code, h.errOut.String())
+	}
+	if strings.Join(got, "|") != "a@b.c|||err" { // an empty line is an answer; the end of input is an error
+		t.Fatalf("answers %q", got)
+	}
+	for _, want := range []string{"Muse email: ", "PIN code sent to a@b.c (empty = send a new one): ", "hello owner"} {
+		if !strings.Contains(h.errOut.String(), want) {
+			t.Fatalf("stderr %q lacks %q", h.errOut.String(), want)
+		}
+	}
+	if !strings.HasPrefix(h.out.String(), "Logged in as account ") || !strings.HasSuffix(h.out.String(), ".\n") {
+		t.Fatalf("stdout %q", h.out.String())
+	}
+	if strings.Contains(h.out.String()+h.errOut.String(), "123456") {
+		t.Fatal("unexpected output")
+	}
+}
+
+func TestLoginNamesTheAccount(t *testing.T) {
+	h := newHarness(t)
+	if code := h.run("", true, "login", "--account", "sg1", "--browser", "cdp:http://127.0.0.1:9222"); code != 0 {
+		t.Fatalf("code=%d %q", code, h.errOut.String())
+	}
+	if h.out.String() != "Logged in as account sg1.\n" {
+		t.Fatalf("stdout %q", h.out.String())
+	}
+}
+
+// --email drives the login even without a terminal; the PIN is read from stdin.
+func TestLoginEmailFlagWithoutTerminal(t *testing.T) {
+	h := newHarness(t)
+	var pin string
+	h.svc.loginFn = func(o muse.LoginOptions) error {
+		pin, _ = o.Ask("PIN? ")
+		return nil
+	}
+	if code := h.run("987654\n", false, "login", "--email", " me@example.com "); code != 0 {
+		t.Fatalf("code=%d %q", code, h.errOut.String())
+	}
+	if len(h.svc.loginOpts) != 1 || h.svc.loginOpts[0].Email != "me@example.com" || pin != "987654" {
+		t.Fatalf("opts %+v pin %q", h.svc.loginOpts, pin)
+	}
+	if code := h.run("", true, "login", "--email"); code != 2 {
+		t.Fatalf("--email without a value: code=%d", code)
+	}
+	if code := h.run("", true, "login", "extra"); code != 2 {
+		t.Fatalf("code=%d", code)
+	}
+}
+
+// Without a terminal and without --email, login only opens muse.ai and waits.
+func TestLoginWithoutTerminalOnlyWaits(t *testing.T) {
+	h := newHarness(t)
+	if code := h.run("", false, "login"); code != 0 {
+		t.Fatalf("code=%d %q", code, h.errOut.String())
+	}
+	if o := h.svc.loginOpts[0]; o.Ask != nil || o.Say != nil || o.Email != "" {
+		t.Fatalf("options %+v", o)
+	}
+	if h.out.String() != "Logged in to muse.ai.\n" {
+		t.Fatalf("stdout %q", h.out.String())
+	}
+}
+
+func TestUsageMentionsLoginEmail(t *testing.T) {
+	h := newHarness(t)
+	h.run("", true, "help")
+	for _, want := range []string{"login [--account N] [--email E]", "PIN code"} {
+		if !strings.Contains(h.out.String(), want) {
+			t.Fatalf("usage lacks %q:\n%s", want, h.out.String())
+		}
 	}
 }
 

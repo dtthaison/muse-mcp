@@ -74,7 +74,7 @@ used against the live site.
 ```sh
 go install github.com/dtthaison/muse-mcp/cmd/muse-mcp@latest
 muse-mcp install   # adds it to Claude Code (runs `claude mcp add -s user muse ...`) and its skills
-muse-mcp login     # log in to muse.ai once, in the Chrome window that opens
+muse-mcp login     # log in to muse.ai once: type your email and PIN code here
 ```
 
 Restart Claude Code and the muse tools are there. `install` also copies the
@@ -104,6 +104,34 @@ From a clone, use `go build -o muse-mcp ./cmd/muse-mcp && ./muse-mcp install`.
 If you skip `muse-mcp login`, the first muse tool call opens the Chrome window
 instead and replies "Log in to muse.ai in the window that just opened, then try
 again." The window hides itself once muse.ai shows your chats.
+
+### Logging in from the terminal
+
+```sh
+muse-mcp login [--account NAME] [--email you@example.com]
+```
+
+In a terminal, `login` opens muse.ai and drives the login with you:
+
+1. It asks `Muse email:` (skipped with `--email`), types the email into muse's
+   login page and presses Continue. A "found a Meta Account" / "Continue as ..."
+   screen is confirmed for you.
+2. muse emails you a code. It asks `PIN code sent to <email> (empty = send a new
+   one):`; you type the digits and muse-mcp enters them in the page. An empty
+   answer presses muse's resend button and asks again. If muse says the code is
+   wrong, you are told and asked again, up to 5 tries.
+3. When muse.ai shows your chats it prints `Logged in as account NAME.`
+
+muse-mcp types into the page the same way for every kind of browser (local
+Chrome, `cdp:` and providers), so this works for a remote or ShardX browser too.
+Only the email and the PIN are automated. If muse asks for anything else (a
+password, a birthday, a captcha, a security check), or nothing moves for 60
+seconds, muse-mcp prints the first lines the page shows and carries on as plain
+`login` does: finish in the browser window and it notices. Without a terminal
+and without `--email`, `login` just opens muse.ai and waits, as before; with
+`--email` and no terminal it reads the PIN from stdin. The email and the PIN
+are never written to the log or to disk (the PIN is echoed in your terminal as
+you type it).
 
 ## Tools
 
@@ -403,7 +431,8 @@ what muse-mcp did before accounts. `accounts.json` lives in `~/.muse-mcp/` (or
 - muse-mcp never closes an attached browser: it drops the connection and, for a
   provider, stops the provider. Whether the window is shown is up to whoever runs
   that browser, so hidden and visible modes change nothing there. Log in to muse
-  in that browser's own window (`muse-mcp login` opens muse.ai there and waits).
+  in that browser's own window (`muse-mcp login` opens muse.ai there; in a terminal
+  it also types your email and PIN into it, see above).
 
 ### Provider contract
 

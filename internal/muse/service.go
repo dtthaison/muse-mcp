@@ -165,6 +165,7 @@ type Service struct {
 	pending  map[string]*pending // by chat ID
 	timedOut map[string]bool     // approval IDs denied by the timeout
 	watching bool
+	loginCtx context.Context // the login tab watchLogin polls, while watching
 	loggedIn bool
 	closed   bool
 }
@@ -297,7 +298,9 @@ func (s *Service) ListChats() []chats.Chat { return s.o.Chats.List() }
 
 // Login opens muse.ai. If it shows its login page, Chrome becomes visible and
 // Login waits until the owner has logged in and the window is hidden again.
-func (s *Service) Login(ctx context.Context) error {
+// With o.Ask set it first types the owner's email and code into the page (see
+// LoginOptions); whatever it can't do, the owner finishes in the window.
+func (s *Service) Login(ctx context.Context, o LoginOptions) error {
 	s.call.Lock()
 	t, err := s.newTab(ctx)
 	if err == nil {
@@ -307,6 +310,13 @@ func (s *Service) Login(ctx context.Context) error {
 	s.call.Unlock()
 	if !errors.Is(err, ErrLoggedOut) {
 		return err
+	}
+	if o.Ask != nil {
+		if tabCtx := s.loginTab(); tabCtx != nil {
+			if err := s.driveLogin(ctx, tabCtx, o); err != nil {
+				return err
+			}
+		}
 	}
 	for {
 		s.mu.Lock()
@@ -703,6 +713,11 @@ func (s *Service) startLogin() error {
 	if err == nil {
 		err = chromedp.Do(tabCtx, chromedp.Navigate(s.o.BaseURL))
 	}
+	if err == nil {
+		s.mu.Lock()
+		s.loginCtx = tabCtx
+		s.mu.Unlock()
+	}
 	if err != nil {
 		if cancel != nil {
 			cancel()
@@ -721,6 +736,7 @@ func (s *Service) watchLogin(tabCtx context.Context, cancel context.CancelFunc) 
 		cancel()
 		s.mu.Lock()
 		s.watching = false
+		s.loginCtx = nil
 		s.mu.Unlock()
 	}()
 	var f failing

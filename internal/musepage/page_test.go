@@ -400,3 +400,70 @@ func TestDeleteUnavailableChat(t *testing.T) {
 		t.Fatalf("deleted %v", got)
 	}
 }
+
+// The login steps are told apart, the email goes in through real input events
+// (the fake's Continue stays disabled until it sees one), and "Continue with
+// Google" is never taken for Continue.
+func TestLoginSteps(t *testing.T) {
+	ctx := newTab(t)
+	srv := fakemuse.New()
+	t.Cleanup(srv.Close)
+	srv.SetLoginFlow("246810")
+	if err := chromedp.Do(ctx, chromedp.Navigate(srv.URL)); err != nil {
+		t.Fatal(err)
+	}
+	step := func(want LoginStep) LoginPage {
+		t.Helper()
+		deadline := time.Now().Add(10 * time.Second)
+		var p LoginPage
+		for time.Now().Before(deadline) {
+			var err error
+			if p, err = LoginSnapshot(ctx); err == nil && p.Step == want {
+				return p
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		t.Fatalf("waiting for step %q; last %+v", want, p)
+		return p
+	}
+	p := step(StepEmail)
+	if lines := p.Lines(8); len(lines) == 0 || !strings.Contains(strings.Join(lines, "\n"), "Log in or create an account") {
+		t.Fatalf("lines %q", lines)
+	}
+	if ok, _ := ClickButton(ctx, LabelContinue, 300*time.Millisecond); ok {
+		t.Fatal("clicked a disabled Continue")
+	}
+	if err := TypeEmail(ctx, "a@b.co"); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := ClickButton(ctx, LabelContinue, 3*time.Second); err != nil || !ok {
+		t.Fatalf("Continue: %v %v", ok, err)
+	}
+	step(StepCode)
+	if srv.LoginEmail() != "a@b.co" {
+		t.Fatalf("email %q", srv.LoginEmail())
+	}
+	if err := TypeCode(ctx, "111111"); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := ClickButton(ctx, LabelSubmitCode, 3*time.Second); !ok {
+		t.Fatal("no submit button")
+	}
+	until2 := time.Now().Add(10 * time.Second)
+	for time.Now().Before(until2) {
+		if p, err := LoginSnapshot(ctx); err == nil && p.WrongCode {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if p, _ := LoginSnapshot(ctx); !p.WrongCode || p.Step != StepCode {
+		t.Fatalf("after a wrong code: %+v", p)
+	}
+	if err := TypeCode(ctx, "246810"); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := ClickButton(ctx, LabelSubmitCode, 3*time.Second); !ok {
+		t.Fatal("no submit button")
+	}
+	step(StepLoggedIn)
+}

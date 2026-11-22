@@ -1,6 +1,7 @@
 // Package musepage drives one muse.ai chat tab. Everything muse-mcp knows
 // about the muse.ai page (selectors, in-page scripts, text it looks for) lives
-// in this file, so a site change is a one-file fix. The facts were verified
+// in this package (this file for the chat, login.go for the login), so a site
+// change is a small fix. The facts were verified
 // against the live site on 2026-10-29; see docs/design.md §3.
 package musepage
 

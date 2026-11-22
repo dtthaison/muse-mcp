@@ -462,7 +462,7 @@ func TestChatSavesVideos(t *testing.T) {
 
 func TestLoginWhenLoggedIn(t *testing.T) {
 	f := newFixture(t, fastTiming())
-	if err := f.svc.Login(context.Background()); err != nil {
+	if err := f.svc.Login(context.Background(), LoginOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if st, _ := f.svc.Status(context.Background()); !st.LoggedIn || st.Visible {
@@ -475,7 +475,7 @@ func TestLoginWaitsForOwner(t *testing.T) {
 	f := newFixture(t, fastTiming())
 	f.srv.SetLoggedOut(true)
 	errc := make(chan error, 1)
-	go func() { errc <- f.svc.Login(context.Background()) }()
+	go func() { errc <- f.svc.Login(context.Background(), LoginOptions{}) }()
 	time.Sleep(3 * time.Second)
 	select {
 	case err := <-errc:
