@@ -91,11 +91,11 @@ func (b *Browser) NewTab(ctx context.Context) (context.Context, context.CancelFu
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if err := b.ensureLocked(); err != nil {
+	if err := b.ensureLocked(ctx); err != nil {
 		return nil, nil, err
 	}
 	tab, cancel := chromedp.NewContext(b.browserCtx)
-	if err := chromedp.Do(tab); err != nil {
+	if err := connect(ctx, tab, cancel); err != nil {
 		cancel()
 		return nil, nil, fmt.Errorf("opening a Chrome tab: %w", err)
 	}
@@ -115,7 +115,7 @@ func (b *Browser) SetVisible(visible bool) error {
 		return nil
 	}
 	b.stopLocked()
-	return b.launchLocked()
+	return b.launchLocked(context.Background())
 }
 
 func (b *Browser) Visible() bool {
@@ -152,25 +152,42 @@ func (b *Browser) Close() error {
 	return err
 }
 
+// runningLocked reports whether the connection is up. A provider that has
+// exited (its tunnel dropped, say) counts as down even before the websocket
+// notices, so the next call tears the connection down and runs it again.
 func (b *Browser) runningLocked() bool {
-	return b.browserCtx != nil && b.browserCtx.Err() == nil
+	return b.browserCtx != nil && b.browserCtx.Err() == nil && (b.prov == nil || !b.prov.exited())
 }
 
-func (b *Browser) ensureLocked() error {
+func (b *Browser) ensureLocked(ctx context.Context) error {
 	if b.runningLocked() {
 		return nil
 	}
 	b.stopLocked()
-	return b.launchLocked()
+	return b.launchLocked(ctx)
 }
 
-func (b *Browser) launchLocked() error {
+// connect opens the connection browserCtx stands for, and gives up (cancelling
+// it) when ctx ends first. The connection is not tied to ctx afterwards: ctx
+// only bounds the time spent connecting.
+func connect(ctx, browserCtx context.Context, cancel context.CancelFunc) error {
+	stop := context.AfterFunc(ctx, cancel)
+	err := chromedp.Do(browserCtx)
+	if !stop() { // ctx ended while connecting; cancel may have run
+		return ctx.Err()
+	}
+	return err
+}
+
+// launchLocked starts or attaches to the browser. ctx bounds the startup only;
+// the browser and the provider outlive it.
+func (b *Browser) launchLocked(ctx context.Context) error {
 	if err := b.lockLocked(); err != nil {
 		return err
 	}
 	switch b.opts.Spec.Kind {
 	case KindCDP:
-		return b.attachLocked(b.opts.Spec.URL)
+		return b.attachLocked(ctx, b.opts.Spec.URL)
 	case KindProvider:
 		argv, err := b.opts.Spec.Argv()
 		if err != nil {
@@ -180,11 +197,11 @@ func (b *Browser) launchLocked() error {
 		if timeout == 0 {
 			timeout = ProviderStartTimeout
 		}
-		url, prov, err := startProvider(argv, timeout)
+		url, prov, err := startProvider(ctx, argv, timeout)
 		if err != nil {
 			return err
 		}
-		if err := b.attachLocked(url); err != nil {
+		if err := b.attachLocked(ctx, url); err != nil {
 			prov.stop()
 			return err
 		}
@@ -209,7 +226,7 @@ func (b *Browser) launchLocked() error {
 	}
 	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
 	browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
-	if err := chromedp.Do(browserCtx); err != nil {
+	if err := connect(ctx, browserCtx, cancelBrowser); err != nil {
 		cancelBrowser()
 		cancelAlloc()
 		return fmt.Errorf("starting Chrome (%s): %w", b.opts.ExecPath, err)
@@ -219,11 +236,12 @@ func (b *Browser) launchLocked() error {
 	return nil
 }
 
-// attachLocked connects to the browser at a DevTools address.
-func (b *Browser) attachLocked(url string) error {
+// attachLocked connects to the browser at a DevTools address. ctx bounds the
+// connecting only.
+func (b *Browser) attachLocked(ctx context.Context, url string) error {
 	allocCtx, cancelAlloc := remote.NewAllocator(context.Background(), url)
 	browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
-	if err := chromedp.Do(browserCtx); err != nil {
+	if err := connect(ctx, browserCtx, cancelBrowser); err != nil {
 		cancelBrowser()
 		cancelAlloc()
 		return fmt.Errorf("connecting to the browser at %s: %w", url, err)

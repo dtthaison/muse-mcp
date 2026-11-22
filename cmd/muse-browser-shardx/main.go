@@ -3,7 +3,7 @@
 // profile, optionally through an SSH tunnel.
 //
 //	muse-browser-shardx --describe
-//	muse-browser-shardx <profile name or id>   # prints the CDP URL, runs until stdin EOF
+//	muse-browser-shardx [--] <profile name or id>   # prints the CDP URL, runs until stdin EOF
 //	muse-browser-shardx setup | list
 //
 // It never stops or closes a ShardX profile.
@@ -31,6 +31,7 @@ const usageText = `usage:
   muse-browser-shardx setup [--api-url URL] [--ssh HOST] [--token-command CMD]
   muse-browser-shardx list              profile names, ids and whether they run
   muse-browser-shardx -- <profile>      same as <profile>, for names like "list"
+                                        (muse-mcp always runs it this way)
 
 config: $XDG_CONFIG_HOME/muse-browser-shardx/config.json
 env:    SHARDX_API_URL SHARDX_API_TOKEN SHARDX_TOKEN_COMMAND SHARDX_SSH
@@ -64,7 +65,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if args[0] == "--" {
 			rest = args[1:]
 		} else if strings.HasPrefix(args[0], "-") {
-			fmt.Fprintf(stderr, "muse-browser-shardx: unknown option %q\n%s", args[0], usageText)
+			name, _, _ := strings.Cut(args[0], "=") // not the value: it could be a token
+			fmt.Fprintf(stderr, "muse-browser-shardx: unknown option %q\n%s", name, usageText)
 			return 2
 		}
 		if len(rest) != 1 || strings.TrimSpace(rest[0]) == "" {

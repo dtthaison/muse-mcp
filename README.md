@@ -395,7 +395,7 @@ muse-mcp accounts remove sg1          # removes the entry only; never touches mu
 |---|---|
 | `local` | Chrome on this computer, started by muse-mcp with its own profile (today's behavior). |
 | `cdp:<url>` | Attach to the browser at that DevTools address (`http://host:port` or `ws://…/devtools/browser/…`). |
-| `<name>:<arg>` | Run the provider `muse-browser-<name>` (found on `PATH`) as `muse-browser-<name> <arg>`. |
+| `<name>:<arg>` | Run the provider `muse-browser-<name>` (found on `PATH`) as `muse-browser-<name> -- <arg>`. |
 | `--browser-cmd "…"` | A provider command of your own. It is split with shell-like quotes and run without a shell; the contract is the same as for a provider. |
 
 `login --browser SPEC` (or `--browser-cmd`) checks the spec, saves it for the
@@ -441,10 +441,12 @@ A provider is an executable named `muse-browser-<name>` on `PATH`.
 1. `muse-browser-<name> --describe` prints one line saying what it is and exits
    0. `muse-mcp browsers` runs it with a 3 second limit; if it fails or is slow
    the name is shown with "(no description)".
-2. A normal run is `muse-browser-<name> <arg>` (or the `--browser-cmd` command).
-   muse-mcp starts it with stdin as a pipe, stdout piped and stderr captured. It
-   prints the DevTools address (`http://host:port` or
-   `ws://…/devtools/browser/…`) as the **first line of stdout**, then keeps
+2. A normal run is `muse-browser-<name> -- <arg>`: the argument always comes after
+   `--`, so an argument such as `setup`, `list` or `-x` is never mistaken for one
+   of the provider's own commands or flags. (A `--browser-cmd` command is run
+   exactly as written, without an added `--`.) muse-mcp starts it with stdin as a
+   pipe, stdout piped and stderr captured. It prints the DevTools address
+   (`http://host:port` or `ws://…/devtools/browser/…`) as the **first line of stdout**, then keeps
    running (it may hold an SSH tunnel) until its **stdin reaches EOF** or it gets
    **SIGTERM**. Everything else it prints on stdout is ignored; log to stderr.
 3. muse-mcp waits up to **90 seconds** for that line. If the provider exits first,
@@ -452,7 +454,12 @@ A provider is an executable named `muse-browser-<name>` on `PATH`.
    stderr.
 4. On disconnect, stop or exit, muse-mcp closes the provider's stdin, sends
    SIGTERM (a provider that exits on EOF gets a moment to), waits up to 5
-   seconds, then sends SIGKILL, and reaps it. When a connection has died, the next
+   seconds, then sends SIGKILL, and reaps it. The provider runs in its own process
+   group and the signals go to the whole group, so a tunnel it started and did not
+   stop (an `ssh -N -L … &`) is stopped with it, also when the provider exited by
+   itself first. (Something the provider starts that must outlive it, such as a
+   browser it launched, has to be detached from the group, for example with
+   `setsid`.) When a connection has died, or the provider has exited, the next
    muse call runs the provider again, because the DevTools port may have changed.
 5. muse-mcp never closes the browser itself: shutting down a browser is the
    provider's business, and a provider that attaches to someone's browser should
@@ -460,13 +467,14 @@ A provider is an executable named `muse-browser-<name>` on `PATH`.
 6. An unknown provider is reported as
    `no browser provider "shardx": install muse-browser-shardx (see README › External browsers), or run muse-mcp browsers to see what you have`.
 
-A provider in 15 lines of `sh`, for a Chrome you start yourself on port 9222
-(muse-mcp runs it as `muse-browser-ssh user@host`):
+A provider in a few lines of `sh`, for a Chrome you start yourself on port 9222
+(muse-mcp runs it as `muse-browser-ssh -- user@host`):
 
 ```sh
 #!/bin/sh
 # muse-browser-ssh: reach a Chrome running with --remote-debugging-port=9222 on another machine.
 [ "$1" = "--describe" ] && { echo "Chrome on another machine, over an SSH tunnel (arg: user@host)"; exit 0; }
+[ "$1" = "--" ] && shift                           # muse-mcp runs: muse-browser-ssh -- user@host
 host=$1; port=19222
 ssh -N -L "127.0.0.1:$port:127.0.0.1:9222" -o ExitOnForwardFailure=yes "$host" &
 tunnel=$!

@@ -32,7 +32,8 @@ func cmdSetup(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 		return err
 	}
 	if fs.NArg() > 0 {
-		return fmt.Errorf("unexpected argument %q (tokens are never passed as arguments)", fs.Arg(0))
+		// Never echo it: a person who types a token here would see it printed (and logged).
+		return fmt.Errorf("setup takes no arguments, only flags (tokens are never passed as arguments; use --token-command)")
 	}
 	given := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })

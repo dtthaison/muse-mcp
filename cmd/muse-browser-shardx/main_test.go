@@ -535,3 +535,50 @@ func TestUsageErrors(t *testing.T) {
 		}
 	}
 }
+
+// muse-mcp runs "muse-browser-shardx -- <profile>", so a profile named like a
+// command or a flag is still a profile.
+func TestProvideAfterDoubleDash(t *testing.T) {
+	f := newFake(t)
+	env := testEnv(t, f, nil)
+	want := fmt.Sprintf("http://127.0.0.1:%d\n", f.cdpPort())
+	if r := runEOF(t, env, "", "--", "fb-1"); r.code != 0 || r.stdout != want {
+		t.Fatalf("-- fb-1: %+v", r)
+	}
+	for _, name := range []string{"list", "setup", "-x", "--describe", "-h"} {
+		before := len(f.calls)
+		r := runEOF(t, env, "", "--", name)
+		if r.code != 1 || r.stdout != "" || !strings.Contains(r.stderr, "no ShardX profile matches") {
+			t.Errorf("-- %s was not taken as a profile name: %+v", name, r)
+		}
+		for _, c := range f.calls[before:] {
+			if strings.Contains(c, "/start") {
+				t.Errorf("-- %s started something: %v", name, f.calls[before:])
+			}
+		}
+	}
+	if _, err := os.Stat(configPath(env)); err == nil {
+		t.Error("-- setup ran setup")
+	}
+}
+
+// A token typed where an argument goes must not be printed back.
+func TestUnexpectedArgumentsAreNotEchoed(t *testing.T) {
+	f := newFake(t)
+	env := testEnv(t, f, nil)
+	for _, args := range [][]string{
+		{"setup", testToken},
+		{"setup", "--ssh", "host", testToken},
+		{"setup", "--token=" + testToken},
+		{"--token=" + testToken},
+		{"-token=" + testToken, "x"},
+	} {
+		r := runEOF(t, env, "", args...)
+		if r.code == 0 {
+			t.Errorf("%v: exit 0", args[:1])
+		}
+		if strings.Contains(r.stdout+r.stderr, testToken) {
+			t.Errorf("%v echoed the token:\n%s%s", args[:1], r.stdout, r.stderr)
+		}
+	}
+}

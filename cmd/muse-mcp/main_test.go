@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -169,5 +170,114 @@ func TestNewMuseReportsABadAccountBrowser(t *testing.T) {
 	_, _, err := newMuse(paths, "sg1", accounts.Account{Browser: "cdp:nope"}, true, testLog())
 	if err == nil || !strings.Contains(err.Error(), "account sg1") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+// Pointing an account at another browser in accounts.json (login --browser ...)
+// takes effect without a restart: the old service is closed, then a new one is built.
+func TestPoolRebuildsWhenTheAccountsBrowserChanges(t *testing.T) {
+	store := accounts.Open(filepath.Join(t.TempDir(), "accounts.json"))
+	save := func(browser string) {
+		t.Helper()
+		if err := store.Save(accounts.File{Accounts: map[string]accounts.Account{"sg1": {Browser: browser}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var events []string
+	pl := &pool{store: store, build: func(name string, acc accounts.Account) (tools.Service, func(), error) {
+		events = append(events, "build "+acc.Browser)
+		return unavailable{}, func() { events = append(events, "close "+acc.Browser) }, nil
+	}}
+	save("cdp:http://127.0.0.1:1")
+	if _, err := pl.Service("sg1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pl.Service("sg1"); err != nil { // unchanged: no rebuild
+		t.Fatal(err)
+	}
+	save("shardx:muse-sg-1")
+	if _, err := pl.Service("sg1"); err != nil {
+		t.Fatal(err)
+	}
+	pl.Close()
+	want := []string{"build cdp:http://127.0.0.1:1", "close cdp:http://127.0.0.1:1", "build shardx:muse-sg-1", "close shardx:muse-sg-1"}
+	if !reflect.DeepEqual(events, want) {
+		t.Fatalf("events %q\nwant   %q", events, want)
+	}
+}
+
+// An account whose browser can't be set up (provider not installed yet) answers
+// with the reason, and works on the next call once it is fixed: failures are not cached.
+func TestPoolRetriesAFailedBuild(t *testing.T) {
+	store := accounts.Open(filepath.Join(t.TempDir(), "accounts.json"))
+	store.Save(accounts.File{Accounts: map[string]accounts.Account{"sg1": {Browser: "shardx:x"}}})
+	broken := errors.New(`no browser provider "shardx"`)
+	installed := false
+	builds := 0
+	var degraded []error
+	pl := &pool{store: store,
+		build: func(name string, acc accounts.Account) (tools.Service, func(), error) {
+			builds++
+			if !installed {
+				return nil, nil, broken
+			}
+			return &muse.Service{}, func() {}, nil
+		},
+		fallback: func(name string, err error) tools.Service {
+			degraded = append(degraded, err)
+			return unavailable{err: err}
+		},
+	}
+	defer pl.Close()
+	for i := 0; i < 2; i++ {
+		svc, err := pl.Service("sg1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if u, ok := svc.(unavailable); !ok || u.err != broken {
+			t.Fatalf("call %d: got %#v", i, svc)
+		}
+	}
+	installed = true
+	svc, err := pl.Service("sg1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := svc.(*muse.Service); !ok {
+		t.Fatalf("after the fix: got %#v", svc)
+	}
+	if builds != 3 || len(degraded) != 2 {
+		t.Fatalf("builds=%d degraded=%d", builds, len(degraded))
+	}
+	if again, _ := pl.Service("sg1"); again != svc || builds != 3 {
+		t.Fatal("a good service was not cached")
+	}
+	// Without a fallback the build error itself comes back.
+	pl2 := &pool{store: store, build: func(string, accounts.Account) (tools.Service, func(), error) { return nil, nil, broken }}
+	if _, err := pl2.Service("sg1"); !errors.Is(err, broken) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+// Once the pool is closed (the server is shutting down) a request still in
+// flight gets an error instead of a freshly built browser nobody will close.
+func TestPoolRefusesServicesAfterClose(t *testing.T) {
+	store := accounts.Open(filepath.Join(t.TempDir(), "accounts.json"))
+	store.Save(accounts.File{Accounts: map[string]accounts.Account{"sg1": {Browser: "local"}}})
+	built, closed := 0, 0
+	pl := &pool{store: store, build: func(string, accounts.Account) (tools.Service, func(), error) {
+		built++
+		return unavailable{}, func() { closed++ }, nil
+	}}
+	if _, err := pl.Service("sg1"); err != nil {
+		t.Fatal(err)
+	}
+	pl.Close()
+	pl.Close() // closing twice is harmless
+	if _, err := pl.Service("sg1"); !errors.Is(err, errPoolClosed) {
+		t.Fatalf("error = %v", err)
+	}
+	if built != 1 || closed != 1 {
+		t.Fatalf("built=%d closed=%d; nothing may be built after Close and everything built must be closed", built, closed)
 	}
 }

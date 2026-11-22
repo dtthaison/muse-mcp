@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -8,11 +9,13 @@ import (
 	"fmt"
 	"image"
 	"image/png"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dtthaison/muse-mcp/internal/accounts"
 	"github.com/dtthaison/muse-mcp/internal/chats"
@@ -107,10 +110,14 @@ func newHarness(t *testing.T) *harness {
 }
 
 func (h *harness) run(stdin string, interactive bool, args ...string) int {
+	return h.runCtx(context.Background(), strings.NewReader(stdin), interactive, args...)
+}
+
+func (h *harness) runCtx(ctx context.Context, stdin io.Reader, interactive bool, args ...string) int {
 	h.out.Reset()
 	h.errOut.Reset()
-	return Run(context.Background(), args, Env{
-		Stdin: strings.NewReader(stdin), Stdout: &h.out, Stderr: &h.errOut, Interactive: interactive,
+	return Run(ctx, args, Env{
+		Stdin: stdin, Stdout: &h.out, Stderr: &h.errOut, Interactive: interactive,
 		Library: h.lib, Voices: h.voices, Accounts: h.accounts,
 		Chats: func(account string) *chats.Registry { h.chatsFor = append(h.chatsFor, account); return h.chats },
 		Muse: func(account string) (Service, func(), error) {
@@ -711,5 +718,88 @@ func TestChatsForget(t *testing.T) {
 	if h.chats.Known("aaa") || !h.chats.Known("bbb") || !strings.Contains(h.out.String(), "Forgot chat aaa") ||
 		!strings.Contains(h.out.String(), "zzz is not in the list") || h.svc.closed {
 		t.Fatalf("out %q closed=%v", h.out.String(), h.svc.closed)
+	}
+}
+
+// Ctrl-C while the owner is asked for a PIN ends the prompt at once, although
+// reading the terminal can't be interrupted; what is typed later is not lost.
+func TestAskReturnsWhenTheContextEnds(t *testing.T) {
+	pr, pw := io.Pipe()
+	defer pw.Close()
+	var stderr bytes.Buffer
+	r := &runner{env: Env{Stderr: &stderr}, in: bufio.NewReader(pr)}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, cancel)
+	done := make(chan error, 1)
+	go func() { _, err := r.ask(ctx, "PIN? "); done <- err }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("error = %v, want context.Canceled", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("ask kept blocking on stdin after its ctx ended")
+	}
+	if !strings.HasPrefix(stderr.String(), "PIN? ") {
+		t.Fatalf("stderr %q", stderr.String())
+	}
+
+	// The abandoned read is still waiting: the next ask gets the line, once.
+	go pw.Write([]byte("123456\nnext\n"))
+	got, err := r.ask(context.Background(), "again: ")
+	if err != nil || got != "123456" {
+		t.Fatalf("got %q, %v", got, err)
+	}
+	if got, err := r.ask(context.Background(), "and: "); err != nil || got != "next" {
+		t.Fatalf("got %q, %v", got, err)
+	}
+	// End of input is still an error, not a cancellation.
+	pw.Close()
+	if _, err := r.ask(context.Background(), "eof: "); !errors.Is(err, io.EOF) {
+		t.Fatalf("error = %v, want io.EOF", err)
+	}
+}
+
+// The whole command: Ctrl-C during the login prompt ends muse-mcp login.
+func TestLoginStopsOnCtrlCWhileAsking(t *testing.T) {
+	h := newHarness(t)
+	pr, pw := io.Pipe()
+	defer pw.Close()
+	h.svc.loginFn = func(o muse.LoginOptions) error {
+		_, err := o.Ask("PIN? ")
+		return err
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, cancel)
+	done := make(chan int, 1)
+	go func() { done <- h.runCtx(ctx, pr, true, "login") }()
+	select {
+	case code := <-done:
+		if code != 1 || !strings.Contains(h.errOut.String(), "context canceled") {
+			t.Fatalf("code=%d stderr=%q", code, h.errOut.String())
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("login did not stop on Ctrl-C while waiting for the PIN")
+	}
+}
+
+// Ctrl-C at "Approve? [y/N]" ends the command without deciding anything.
+func TestApprovalPromptStopsOnCtrlC(t *testing.T) {
+	h := newHarness(t)
+	h.svc.result = approvalResult()
+	pr, pw := io.Pipe()
+	defer pw.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, cancel)
+	done := make(chan int, 1)
+	go func() { done <- h.runCtx(ctx, pr, true, "chat", "post it") }()
+	select {
+	case code := <-done:
+		if code != 1 || len(h.svc.decisions) != 0 {
+			t.Fatalf("code=%d decisions=%+v stderr=%q", code, h.svc.decisions, h.errOut.String())
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the approval prompt kept blocking after Ctrl-C")
 	}
 }

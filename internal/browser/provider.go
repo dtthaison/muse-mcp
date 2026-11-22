@@ -34,15 +34,22 @@ const providerEOFGrace = 200 * time.Millisecond
 // provider is a running external provider: a program that prints a DevTools
 // address and then keeps running (it may hold tunnels) until its stdin closes.
 type provider struct {
-	cmd   *exec.Cmd
-	stdin io.WriteCloser
-	done  chan struct{} // closed when the process has been reaped
-	errw  *tailWriter
+	cmd      *exec.Cmd
+	stdin    io.WriteCloser
+	done     chan struct{} // closed when the process has been reaped
+	errw     *tailWriter
+	stopOnce sync.Once
 }
 
 // startProvider runs argv and waits up to timeout for the first line of its
-// stdout, which must be a DevTools address.
-func startProvider(argv []string, timeout time.Duration) (string, *provider, error) {
+// stdout, which must be a DevTools address. A cancelled ctx aborts the wait and
+// stops the half-started provider; once it has started, the provider's life is
+// not tied to ctx (it runs until stop).
+func startProvider(ctx context.Context, argv []string, timeout time.Duration) (string, *provider, error) {
+	if err := ctx.Err(); err != nil {
+		return "", nil, err
+	}
+	// Not exec.CommandContext: ctx belongs to one request, the provider outlives it.
 	cmd := exec.Command(argv[0], argv[1:]...)
 	// Its own process group, so a Ctrl-C meant for muse-mcp doesn't kill the
 	// provider before muse-mcp has shut it down in order.
@@ -75,12 +82,17 @@ func startProvider(argv []string, timeout time.Duration) (string, *provider, err
 		select { // the line may have arrived just before the exit
 		case line = <-first.line:
 		default:
-			return "", nil, p.failure(argv[0], waitErr, "exited before it printed a DevTools address")
+			err := p.failure(argv[0], waitErr, "exited before it printed a DevTools address")
+			p.stop() // anything it left behind in its group goes too
+			return "", nil, err
 		}
 	case <-timer.C:
 		err := p.failure(argv[0], nil, fmt.Sprintf("did not print a DevTools address within %s", timeout.Round(time.Second)))
 		p.stop()
 		return "", nil, err
+	case <-ctx.Done():
+		p.stop()
+		return "", nil, fmt.Errorf("starting browser provider %s: %w", argv[0], ctx.Err())
 	}
 	line = strings.TrimSpace(line)
 	if err := CheckDevToolsURL(line); err != nil {
@@ -102,34 +114,60 @@ func (p *provider) failure(name string, waitErr error, what string) error {
 	return errors.New(msg + "\n" + p.errw.report())
 }
 
-// stop closes the provider's stdin, sends SIGTERM (after a short moment for
-// a provider that exits on EOF), waits up to 5 s, then sends SIGKILL, and returns once the process has been reaped.
+// stop closes the provider's stdin, sends SIGTERM to its process group (after
+// a short moment for a provider that exits on EOF), waits up to 5 s for the
+// leader to exit and the group to empty, then sends SIGKILL to the group. It
+// returns once the leader has been reaped and nothing is left in the group, so
+// a tunnel the provider started and did not stop goes with it. Calling it
+// again is harmless.
 func (p *provider) stop() {
 	if p == nil {
 		return
 	}
+	p.stopOnce.Do(p.stopNow)
+	<-p.done
+}
+
+func (p *provider) stopNow() {
 	p.stdin.Close()
 	// A provider that exits on stdin EOF gets a moment to do so before the signal.
 	select {
 	case <-p.done:
-		return
 	case <-time.After(providerEOFGrace):
 	}
-	if p.cmd.Process != nil {
-		p.cmd.Process.Signal(syscall.SIGTERM)
-	}
-	select {
-	case <-p.done:
+	if p.cmd.Process == nil {
 		return
-	case <-time.After(providerStopTimeout):
 	}
-	if p.cmd.Process != nil {
-		// The whole group, so a tunnel the provider left behind goes too.
-		if syscall.Kill(-p.cmd.Process.Pid, syscall.SIGKILL) != nil {
-			p.cmd.Process.Kill()
+	pgid := p.cmd.Process.Pid // the provider leads its own process group
+	if !p.exited() || groupAlive(pgid) {
+		if syscall.Kill(-pgid, syscall.SIGTERM) != nil {
+			p.cmd.Process.Signal(syscall.SIGTERM)
 		}
 	}
-	<-p.done
+	deadline := time.NewTimer(providerStopTimeout)
+	defer deadline.Stop()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for !p.exited() || groupAlive(pgid) {
+		select {
+		case <-deadline.C:
+			// The whole group, so a tunnel the provider left behind goes too.
+			if syscall.Kill(-pgid, syscall.SIGKILL) != nil {
+				p.cmd.Process.Kill()
+			}
+			<-p.done
+			return
+		case <-tick.C:
+		}
+	}
+}
+
+// groupAlive reports whether any process is left in the process group pgid.
+// Only call it for a group whose leader is this provider: once the group is
+// empty its id can belong to another process.
+func groupAlive(pgid int) bool {
+	err := syscall.Kill(-pgid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
 func (p *provider) exited() bool {

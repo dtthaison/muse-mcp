@@ -19,8 +19,9 @@ type LoginOptions struct {
 }
 
 const (
-	maxCodeTries = 5
-	drivePoll    = 400 * time.Millisecond
+	maxCodeTries  = 5
+	maxMetaClicks = 3 // "Continue as ..." presses before the owner takes over
+	drivePoll     = 400 * time.Millisecond
 	// A wrong code that is still on screen from the last try counts as a new
 	// answer only after this long without the page clearing it.
 	staleWrongGrace = 2 * time.Second
@@ -65,7 +66,7 @@ func (s *Service) driveLogin(ctx, tab context.Context, o LoginOptions) error {
 		say(msg + "\nFinish logging in in the browser window; muse-mcp waits for it.")
 	}
 
-	email, emailSent, tries := strings.TrimSpace(o.Email), false, 0
+	email, emailSent, tries, metaClicks := strings.TrimSpace(o.Email), false, 0, 0
 	last := time.Now() // the last sign of progress
 	var page musepage.LoginPage
 	for {
@@ -87,12 +88,23 @@ func (s *Service) driveLogin(ctx, tab context.Context, o LoginOptions) error {
 			continue
 		}
 		page = p
+		if p.Unusual && p.Step != musepage.StepLoggedIn {
+			giveUp("the page asks for something other than an email and a code", p)
+			return nil
+		}
 		switch p.Step {
 		case musepage.StepLoggedIn:
 			return nil
 		case musepage.StepMeta:
+			// A Meta screen that is still there after a few clicks is stuck:
+			// clicking on, and counting each click as progress, would loop forever.
+			if metaClicks >= maxMetaClicks {
+				giveUp("the Meta account screen does not go away", p)
+				return nil
+			}
 			if ok, _ := musepage.ClickButton(op, musepage.LabelMeta, 2*time.Second); ok {
-				s.o.Log.Info("terminal login: confirmed the Meta account screen")
+				metaClicks++
+				s.o.Log.Info("terminal login: confirmed the Meta account screen", "try", metaClicks)
 				last = time.Now()
 			}
 			sleep(op, time.Second)
@@ -103,6 +115,9 @@ func (s *Service) driveLogin(ctx, tab context.Context, o LoginOptions) error {
 			}
 			if email == "" {
 				a, err := o.Ask("Muse email: ")
+				if ctx.Err() != nil {
+					return ctx.Err() // Ctrl-C while the owner was typing
+				}
 				if email = strings.TrimSpace(a); err != nil || email == "" {
 					giveUp("no email was given", p)
 					return nil
@@ -129,6 +144,9 @@ func (s *Service) driveLogin(ctx, tab context.Context, o LoginOptions) error {
 				who = email
 			}
 			a, err := o.Ask(fmt.Sprintf("PIN code sent to %s (empty = send a new one): ", who))
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			if err != nil {
 				giveUp("no code was given", p)
 				return nil
@@ -157,10 +175,6 @@ func (s *Service) driveLogin(ctx, tab context.Context, o LoginOptions) error {
 			}
 			last = time.Now()
 		default:
-			if p.Unusual {
-				giveUp("the page asks for something other than an email and a code", p)
-				return nil
-			}
 			sleep(op, drivePoll)
 		}
 	}

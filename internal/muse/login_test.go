@@ -312,3 +312,88 @@ func TestTerminalLoginGivesUpAfterFiveWrongCodes(t *testing.T) {
 	}
 	noSecretsInLog(t, f)
 }
+
+// loginHandedOver waits for the hand-over message and returns what was said.
+func loginHandedOver(t *testing.T, o *owner) string {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for !strings.Contains(o.allSaid(), "Finish logging in in the browser window") {
+		if time.Now().After(deadline) {
+			t.Fatalf("no hand-over message; said %q", o.allSaid())
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return o.allSaid()
+}
+
+// finishByHand plays the owner logging in in the window, and waits for Login to notice.
+func finishByHand(t *testing.T, f *loginFixture, errc chan error) {
+	t.Helper()
+	f.srv.SetLoggedOut(false)
+	select {
+	case err := <-errc:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("Login did not notice the login")
+	}
+	assertLoggedIn(t, f)
+}
+
+// A "Continue as ..." screen that doesn't go away used to be clicked for ever,
+// each click counting as progress. After a few presses the owner takes over.
+func TestTerminalLoginGivesUpOnAStuckMetaScreen(t *testing.T) {
+	f := newLoginFixture(t)
+	f.srv.SetLoginPage(`<h1>Muse</h1><p>Log in or create an account</p><p>We found a Meta Account</p>
+<button onclick="fetch('/__login/meta', {method: 'POST'})">Continue as Jane</button>`)
+	o := &owner{}
+	errc := make(chan error, 1)
+	go func() { errc <- login(t, f, o.opts(testEmail)) }()
+	said := loginHandedOver(t, o)
+	if !strings.Contains(said, "Meta account screen does not go away") {
+		t.Fatalf("said %q", said)
+	}
+	if n := f.srv.MetaClicks(); n != maxMetaClicks {
+		t.Fatalf("the Meta button was pressed %d times, want %d", n, maxMetaClicks)
+	}
+	if len(o.asked()) != 0 {
+		t.Fatalf("asked %q", o.asked())
+	}
+	time.Sleep(1500 * time.Millisecond) // and it stays handed over: no more presses
+	if n := f.srv.MetaClicks(); n != maxMetaClicks {
+		t.Fatalf("the Meta button kept being pressed: %d", n)
+	}
+	finishByHand(t, f, errc)
+}
+
+// An email box beside a password box (or a captcha) is not the plain email
+// step: nothing is asked or typed, the owner takes over at once.
+func TestTerminalLoginHandsOverOnScreensItDoesNotDrive(t *testing.T) {
+	for name, body := range map[string]string{
+		"password box": `<h1>Muse</h1><p>Log in or create an account</p>
+<input placeholder="Mobile number or email (required)"><input type="password" placeholder="Password"><button>Continue</button>`,
+		"password box beside the code": `<h1>Muse</h1><p>Log in or create an account</p><p>Enter your code</p>
+<input inputmode="numeric"><input type="password"><button>Continue</button>`,
+		"captcha": `<h1>Muse</h1><p>Log in or create an account</p><p>Please complete the security check</p>
+<input placeholder="Mobile number or email (required)"><button>Continue</button>`,
+		"birthday": `<h1>Muse</h1><p>Log in or create an account</p><p>Enter your birthday</p>
+<input placeholder="Mobile number or email (required)"><button>Continue</button>`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newLoginFixture(t)
+			f.srv.SetLoginPage(body)
+			o := &owner{}
+			errc := make(chan error, 1)
+			go func() { errc <- login(t, f, o.opts("")) }()
+			said := loginHandedOver(t, o)
+			if !strings.Contains(said, "asks for something other than an email and a code") {
+				t.Fatalf("said %q", said)
+			}
+			if len(o.asked()) != 0 {
+				t.Fatalf("the owner was asked %q on a screen muse-mcp must not drive", o.asked())
+			}
+			finishByHand(t, f, errc)
+		})
+	}
+}

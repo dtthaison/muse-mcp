@@ -177,6 +177,36 @@ type runner struct {
 	env     Env
 	in      *bufio.Reader
 	account string // from a --account before the command name
+	// pending is a line read from in that nobody has taken yet: a read
+	// abandoned when its ctx ended keeps running, and the next readLine takes
+	// its result instead of starting a second read of in.
+	pending chan lineResult
+}
+
+type lineResult struct {
+	line string
+	err  error
+}
+
+// readLine reads one line from stdin, or returns ctx.Err() as soon as ctx ends
+// (Ctrl-C): a blocked read of a terminal can't be interrupted, so it runs on in
+// the background and its result waits for the next readLine. Not for concurrent use.
+func (r *runner) readLine(ctx context.Context) (string, error) {
+	if r.pending == nil {
+		ch := make(chan lineResult, 1)
+		r.pending = ch
+		go func() {
+			line, err := r.in.ReadString('\n')
+			ch <- lineResult{line, err}
+		}()
+	}
+	select {
+	case res := <-r.pending:
+		r.pending = nil
+		return res.line, res.err
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
 }
 
 // globalAccount takes a leading --account NAME (before the command name).
@@ -600,7 +630,11 @@ func (r *runner) finish(ctx context.Context, svc Service, res muse.Result, err e
 			return r.undecided(res, asJSON, "Not deciding without a terminal")
 		}
 		fmt.Fprint(r.env.Stderr, "Approve? [y/N] ")
-		line, readErr := r.in.ReadString('\n')
+		line, readErr := r.readLine(ctx)
+		if readErr != nil && ctx.Err() != nil {
+			fmt.Fprintln(r.env.Stderr)
+			return r.fail(ctx.Err())
+		}
 		answer := strings.ToLower(strings.TrimSpace(line))
 		if readErr != nil && answer == "" {
 			fmt.Fprintln(r.env.Stderr)
@@ -802,7 +836,8 @@ func (r *runner) login(ctx context.Context, args []string) int {
 	var opts muse.LoginOptions
 	driven := r.env.Interactive || strings.TrimSpace(*email) != ""
 	if driven {
-		opts = muse.LoginOptions{Email: strings.TrimSpace(*email), Ask: r.ask,
+		opts = muse.LoginOptions{Email: strings.TrimSpace(*email),
+			Ask: func(prompt string) (string, error) { return r.ask(ctx, prompt) },
 			Say: func(m string) { fmt.Fprintln(r.env.Stderr, m) }}
 	}
 	acct, err := r.resolve(name)
@@ -828,10 +863,11 @@ func (r *runner) login(ctx context.Context, args []string) int {
 }
 
 // ask prints prompt on stderr and reads one line from stdin. It fails when
-// stdin ends before an answer; an empty line is an answer.
-func (r *runner) ask(prompt string) (string, error) {
+// stdin ends before an answer, or with ctx.Err() as soon as ctx ends (Ctrl-C
+// while waiting for the owner to type); an empty line is an answer.
+func (r *runner) ask(ctx context.Context, prompt string) (string, error) {
 	fmt.Fprint(r.env.Stderr, prompt)
-	line, err := r.in.ReadString('\n')
+	line, err := r.readLine(ctx)
 	if err != nil && line == "" {
 		fmt.Fprintln(r.env.Stderr)
 		return "", err

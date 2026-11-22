@@ -162,14 +162,20 @@ func serve(ctx context.Context, paths config.Paths, store *accounts.Store, log *
 	// One browser and muse service per account, built on the first muse call
 	// for it. Each takes its lock then, so a session that never uses muse
 	// doesn't keep the CLI or other sessions out.
-	pl := &pool{store: store, build: func(name string, acc accounts.Account) (tools.Service, func(), error) {
-		s, closeFn, err := newMuse(paths, name, acc, true, log)
-		if err != nil {
-			// Saved references and the list of chats still work.
-			return unavailable{err, accountChats(paths, name, log)}, nil, nil
-		}
-		return s, closeFn, nil
-	}}
+	pl := &pool{store: store,
+		build: func(name string, acc accounts.Account) (tools.Service, func(), error) {
+			s, closeFn, err := newMuse(paths, name, acc, true, log)
+			if err != nil {
+				return nil, nil, err
+			}
+			return s, closeFn, nil
+		},
+		// Saved references and the list of chats still work while the account's
+		// browser can't be set up; the next call tries again.
+		fallback: func(name string, err error) tools.Service {
+			return unavailable{err, accountChats(paths, name, log)}
+		},
+	}
 	defer pl.Close()
 
 	server := mcp.NewServer(&mcp.Implementation{Name: "muse-mcp", Version: version}, nil)

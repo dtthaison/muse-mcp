@@ -271,7 +271,7 @@ only (never muse, the browser or the account's state directory). `login
 the provider is installed, saves the account and then logs in.
 
 **Browser specs.** `local` (own Chrome, own profile); `cdp:<url>` (attach to that
-DevTools URL); `<name>:<arg>` (run `muse-browser-<name> <arg>` from `PATH`); a
+DevTools URL); `<name>:<arg>` (run `muse-browser-<name> -- <arg>` from `PATH`); a
 `command` array (from `--browser-cmd`, split with shell-like quoting, never run
 through a shell) with the same contract as a provider. `MUSE_CDP_URL`, if set,
 overrides the spec of the account in use.
@@ -281,7 +281,10 @@ overrides the spec of the account in use.
 - `muse-browser-<name> --describe` prints one line and exits 0. `muse-mcp
   browsers` runs it with a 3 s timeout; on failure the name is listed with
   "(no description)".
-- Normal run: stdin is a pipe, stdout is piped, stderr is captured. The provider
+- Normal run: `muse-browser-<name> -- <arg>`. The `--` is always passed, so an
+  argument such as `setup`, `list` or `-x` can't be read as a provider command or
+  flag (a `--browser-cmd` command is run as written). stdin is a pipe, stdout is
+  piped, stderr is captured. The provider
   prints the CDP URL (`http://host:port` or `ws://…/devtools/browser/…`) as the
   first line of stdout, then keeps running (it may hold tunnels) until its stdin
   reaches EOF or it gets SIGTERM.
@@ -289,10 +292,15 @@ overrides the spec of the account in use.
   error carries the provider's exit code and the last 20 lines of its stderr.
 - On disconnect, stop or `Close`, muse-mcp closes the provider's stdin, sends
   SIGTERM (after a 200 ms moment for a provider that exits on EOF), waits up to
-  5 s, then SIGKILLs the provider's process group, and reaps it. The provider
-  runs in its own process group so a Ctrl-C meant for muse-mcp doesn't kill it
-  before muse-mcp has shut it down in order. A dead connection relaunch runs the
-  provider again, since the CDP port may have changed.
+  5 s, then SIGKILLs the provider's process group, and reaps it. The signals go
+  to the whole group, and also when the provider exited by itself first, so a
+  tunnel it left behind goes too. The provider runs in its own process group so
+  a Ctrl-C meant for muse-mcp doesn't kill it before muse-mcp has shut it down in
+  order. A dead connection, or a provider that has exited, makes the next call
+  run the provider again, since the CDP port may have changed. `NewTab(ctx)`
+  bounds the startup (waiting for the address, connecting) with its ctx, and
+  stops a half-started provider when ctx ends; once running, neither the
+  provider nor the connection is tied to the request's ctx.
 - muse-mcp never closes an attached browser; the connection is dropped,
   `SetVisible` is a no-op, and the visible window is whoever's browser it is.
 - Unknown provider: `no browser provider "shardx": install muse-browser-shardx
@@ -309,7 +317,11 @@ and builds one browser and `muse.Service` per account on first use; each takes
 its account's lock lazily (`LockLater`), as before. An unknown account is a tool
 error that lists the known accounts. A browser that can't be set up (no Chrome,
 no such provider) makes that account's tools answer with the reason, while
-`muse_list_chats` still works. `muse_status` includes `account` and `browser`.
+`muse_list_chats` still works; that answer is not cached, so installing the
+provider or fixing the account takes effect on the next call. An account whose
+browser was changed in `accounts.json` gets a new service (the old one is closed
+first, because both want the account's lock). After `Close` the pool builds
+nothing more. `muse_status` includes `account` and `browser`.
 The browser kinds are separate from the accounts: two accounts can't share a
 `chrome-profile`, but nothing stops two accounts from pointing at the same
 attached browser, which would mix their logins; don't.

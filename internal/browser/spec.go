@@ -21,7 +21,8 @@ const (
 )
 
 // ProviderPrefix is the start of a provider executable's name: the browser
-// spec "shardx:muse-sg-1" runs "muse-browser-shardx muse-sg-1".
+// spec "shardx:muse-sg-1" runs "muse-browser-shardx -- muse-sg-1" (the "--" keeps
+// an argument such as "setup" or "-x" from being read as a provider command or flag).
 const ProviderPrefix = "muse-browser-"
 
 var providerName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
@@ -116,7 +117,8 @@ func (e *ErrNoProvider) Error() string {
 }
 
 // Argv resolves a provider spec to the program and arguments to run,
-// looking the program up on PATH.
+// looking the program up on PATH. A "NAME:ARG" spec runs the provider as
+// "muse-browser-NAME -- ARG"; a command array is run exactly as written.
 func (s Spec) Argv() ([]string, error) {
 	if s.Kind != KindProvider {
 		return nil, errors.New("not a provider browser")
@@ -132,7 +134,7 @@ func (s Spec) Argv() ([]string, error) {
 	if err != nil {
 		return nil, &ErrNoProvider{Name: s.Name}
 	}
-	return []string{p, s.Arg}, nil
+	return []string{p, "--", s.Arg}, nil
 }
 
 // Check reports a spec that can't work, such as a provider that isn't installed.

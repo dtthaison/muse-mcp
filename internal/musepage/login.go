@@ -32,12 +32,19 @@ const (
 	StepOther    LoginStep = "other" // loading, or a screen muse-mcp does not drive
 )
 
+const blockers = `birthday|birth date|date of birth|how old|your age|captcha|security check|verify you.re human|are you a robot`
+
 var (
 	codeScreenRE = regexp.MustCompile(`(?i)enter (your|the) code|confirmation code`)
 	metaScreenRE = regexp.MustCompile(`(?i)found a meta account`)
 	wrongCodeRE  = regexp.MustCompile(`(?i)incorrect|isn.t right|invalid`)
 	// Screens muse-mcp does not type into; the owner finishes these by hand.
-	unexpectedRE = regexp.MustCompile(`(?i)password|birthday|birth date|date of birth|how old|your age|captcha|security check|verify you.re human|are you a robot`)
+	// blockerRE is what stops the login even beside an email box. unexpectedRE
+	// adds the bare word "password", which on a screen with an email box is
+	// probably just a "Forgot password?" link: there a visible password box
+	// (see LoginSnapshot) is what counts.
+	blockerRE    = regexp.MustCompile(`(?i)` + blockers)
+	unexpectedRE = regexp.MustCompile(`(?i)password|` + blockers)
 )
 
 // Button labels, matched on trimmed text, case-insensitively.
@@ -51,9 +58,12 @@ const (
 // LoginPage is one reading of the login page.
 type LoginPage struct {
 	Step      LoginStep
-	WrongCode bool   // the page says the code was wrong
-	Unusual   bool   // a password, birthday, captcha or security screen
-	Text      string // the visible text
+	WrongCode bool // the page says the code was wrong
+	// Unusual says the page wants something muse-mcp does not type: a password
+	// box, a birthday, a captcha or a security check, alone or beside the
+	// email box. The owner finishes these by hand.
+	Unusual bool
+	Text    string // the visible text
 }
 
 // Lines returns the first n non-empty lines of the visible text, for showing
@@ -91,6 +101,7 @@ var loginReadJS = fmt.Sprintf(`(() => { %s
   return {
     text: document.body ? document.body.innerText : '',
     email: !!%s,
+    password: [...document.querySelectorAll('input[type=password]')].some(vis),
     buttons: [...document.querySelectorAll('button,[role=button]')].filter(vis).map(b => (b.innerText || b.value || '').trim()),
   };
 })()`, visibleJS, emailInputJS)
@@ -106,14 +117,15 @@ func LoginSnapshot(ctx context.Context) (LoginPage, error) {
 		return LoginPage{Step: StepLoggedIn}, nil
 	}
 	raw, err := chromedp.Run(ctx, chromedp.Evaluate[struct {
-		Text    string   `json:"text"`
-		Email   bool     `json:"email"`
-		Buttons []string `json:"buttons"`
+		Text     string   `json:"text"`
+		Email    bool     `json:"email"`
+		Password bool     `json:"password"`
+		Buttons  []string `json:"buttons"`
 	}](loginReadJS))
 	if err != nil {
 		return LoginPage{}, err
 	}
-	p := LoginPage{Step: StepOther, Text: raw.Text, WrongCode: wrongCodeRE.MatchString(raw.Text)}
+	p := LoginPage{Step: StepOther, Text: raw.Text, WrongCode: wrongCodeRE.MatchString(raw.Text), Unusual: raw.Password}
 	metaButton := regexp.MustCompile(`(?i)^continue as `)
 	hasMeta := false
 	for _, b := range raw.Buttons {
@@ -125,9 +137,12 @@ func LoginSnapshot(ctx context.Context) (LoginPage, error) {
 	case hasMeta || metaScreenRE.MatchString(raw.Text):
 		p.Step = StepMeta
 	case raw.Email:
+		// An email box beside a password box, a captcha and the like is not the
+		// plain email step: typing the email would not get the owner anywhere.
 		p.Step = StepEmail
+		p.Unusual = p.Unusual || blockerRE.MatchString(raw.Text)
 	default:
-		p.Unusual = unexpectedRE.MatchString(raw.Text)
+		p.Unusual = p.Unusual || unexpectedRE.MatchString(raw.Text)
 	}
 	return p, nil
 }

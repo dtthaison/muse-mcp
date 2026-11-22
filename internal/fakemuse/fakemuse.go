@@ -76,7 +76,9 @@ type Server struct {
 	mu      sync.Mutex
 	deleted []string
 
-	flow    bool // the login page is the email and code flow
+	flow    bool   // the login page is the email and code flow
+	custom  string // a login page set with SetLoginPage; wins over the others
+	metas   int
 	goodPIN string
 	email   string
 	codes   []string
@@ -102,6 +104,8 @@ func New() *Server {
 				s.email = string(body)
 			case "/__login/resend":
 				s.resends++
+			case "/__login/meta":
+				s.metas++
 			case "/__login/code":
 				s.codes = append(s.codes, string(body))
 				if string(body) == s.goodPIN {
@@ -124,9 +128,11 @@ func New() *Server {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if s.loggedOut.Load() {
 			s.mu.Lock()
-			flow := s.flow
+			flow, custom := s.flow, s.custom
 			s.mu.Unlock()
-			if flow {
+			if custom != "" {
+				w.Write([]byte(custom))
+			} else if flow {
 				w.Write([]byte(flowPage))
 			} else {
 				w.Write([]byte(loginPage))
@@ -167,6 +173,27 @@ func (s *Server) SetLoginFlow(pin string) {
 	s.flow, s.goodPIN = true, pin
 	s.mu.Unlock()
 	s.loggedOut.Store(true)
+}
+
+// SetLoginPage makes the login page just body, followed by the script that
+// moves on once the test "logs in" (SetLoggedOut(false)), and logs the page
+// out. A button in body can POST to /__login/meta; MetaClicks counts those.
+// It is for screens a terminal login must not drive: a Meta account screen that
+// never goes away, a password box, a captcha.
+func (s *Server) SetLoginPage(body string) {
+	s.mu.Lock()
+	s.custom = `<!doctype html><html><body>` + body + `<script>setInterval(async () => {
+  if ((await (await fetch('/__loggedin')).text()) === 'yes') location.href = '/thread/new';
+}, 300);</script></body></html>`
+	s.mu.Unlock()
+	s.loggedOut.Store(true)
+}
+
+// MetaClicks counts the POSTs to /__login/meta from a SetLoginPage button.
+func (s *Server) MetaClicks() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.metas
 }
 
 // LoginEmail is the email the login flow's first step was submitted with.

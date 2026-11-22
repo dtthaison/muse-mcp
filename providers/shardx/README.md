@@ -93,14 +93,15 @@ muse-browser-shardx list                 # profile names, ids, running or stoppe
 muse-mcp login --account sg1 --browser shardx:muse-sg-1
 ```
 
-`shardx:<profile>` runs `muse-browser-shardx <profile>`. The profile can be given by id,
+`shardx:<profile>` runs `muse-browser-shardx -- <profile>` (the `--` keeps a profile named
+like a command, `list` or `setup`, from being run as one; by hand you can leave it out). The profile can be given by id,
 by exact name, or by name in any letter case; if several profiles match, the provider
 stops with the list of matches (use the id then).
 
 Provider contract (what muse-mcp relies on):
 
 - `muse-browser-shardx --describe` prints one line and exits 0.
-- `muse-browser-shardx <profile>` prints the DevTools URL as the first line of stdout,
+- `muse-browser-shardx [--] <profile>` prints the DevTools URL as the first line of stdout,
   then keeps running until its stdin closes or it gets SIGTERM/SIGINT; then it removes
   its SSH tunnels and exits 0.
 - On any error it prints a message on stderr, prints nothing on stdout and exits non-zero.
