@@ -273,8 +273,9 @@ func putFiles(ctx context.Context, files []string) error {
 // an approval in that chat waits for an answer.
 var ErrComposerPaused = errors.New("muse has paused this chat until its waiting approval is answered: allow or deny it in muse.ai, then try again")
 
+// Only the disabled file input says so: muse sets
+// data-hatch-composer-lock-status="true" on every chat, paused or not.
 var composerPausedJS = fmt.Sprintf(`(() => {
-  if (document.querySelector('[data-hatch-composer-lock-status="true"]')) return true;
   const input = document.querySelector(%s);
   return !!(input && input.disabled);
 })()`, q(selFileInput))
