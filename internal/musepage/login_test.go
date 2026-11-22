@@ -57,6 +57,11 @@ func TestLoginSnapshotUnusualScreens(t *testing.T) {
 		{"code step", `<p>Enter your code</p><input inputmode="numeric"><button>Continue</button>`, StepCode, false},
 		{"code step with a password box", `<p>Enter your code</p><input inputmode="numeric"><input type="password">`, StepCode, true},
 		{"password screen without an email box", `<p>Enter your password</p><input type="text"><button>Continue</button>`, StepOther, true},
+		// muse.ai's landing page says "your agent"; that is not "your age".
+		{"landing page text", email + `<p>Every Muse user shares a computer with your agent.</p>`, StepEmail, false},
+		{"use phone or email button", `<p>Log in or create an account</p><button>Use phone or email</button>`, StepChoose, false},
+		{"use phone or email beside the box", email + `<button>Use phone or email</button>`, StepEmail, false},
+		{"your age", `<p>Confirm your age</p><button>Next</button>`, StepOther, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := loginPageOf(t, tc.body)

@@ -27,12 +27,15 @@ type LoginStep string
 const (
 	StepLoggedIn LoginStep = "logged-in"
 	StepEmail    LoginStep = "email"
+	StepChoose   LoginStep = "choose" // a "Use phone or email" button hides the email box
 	StepMeta     LoginStep = "meta"
 	StepCode     LoginStep = "code"
 	StepOther    LoginStep = "other" // loading, or a screen muse-mcp does not drive
 )
 
-const blockers = `birthday|birth date|date of birth|how old|your age|captcha|security check|verify you.re human|are you a robot`
+// Word boundaries matter: the landing page says "your agent", which contains
+// "your age".
+const blockers = `\b(?:birthday|birth date|date of birth|how old|your age|captcha|security check|verify you.re human|are you a robot)\b`
 
 var (
 	codeScreenRE = regexp.MustCompile(`(?i)enter (your|the) code|confirmation code`)
@@ -44,7 +47,7 @@ var (
 	// probably just a "Forgot password?" link: there a visible password box
 	// (see LoginSnapshot) is what counts.
 	blockerRE    = regexp.MustCompile(`(?i)` + blockers)
-	unexpectedRE = regexp.MustCompile(`(?i)password|` + blockers)
+	unexpectedRE = regexp.MustCompile(`(?i)\bpassword\b|` + blockers)
 )
 
 // Button labels, matched on trimmed text, case-insensitively.
@@ -53,6 +56,7 @@ const (
 	LabelMeta       = `^continue( as .*)?$`
 	LabelSubmitCode = `^(continue|next|confirm|submit|verify)$`
 	LabelResend     = `resend|new code`
+	LabelUseEmail   = `^use (phone or email|email or phone|email|mobile number or email)$`
 )
 
 // LoginPage is one reading of the login page.
@@ -127,15 +131,19 @@ func LoginSnapshot(ctx context.Context) (LoginPage, error) {
 	}
 	p := LoginPage{Step: StepOther, Text: raw.Text, WrongCode: wrongCodeRE.MatchString(raw.Text), Unusual: raw.Password}
 	metaButton := regexp.MustCompile(`(?i)^continue as `)
-	hasMeta := false
+	useEmail := regexp.MustCompile(`(?i)` + LabelUseEmail)
+	hasMeta, hasUseEmail := false, false
 	for _, b := range raw.Buttons {
 		hasMeta = hasMeta || metaButton.MatchString(b)
+		hasUseEmail = hasUseEmail || useEmail.MatchString(b)
 	}
 	switch {
 	case codeScreenRE.MatchString(raw.Text):
 		p.Step = StepCode
 	case hasMeta || metaScreenRE.MatchString(raw.Text):
 		p.Step = StepMeta
+	case !raw.Email && hasUseEmail:
+		p.Step = StepChoose
 	case raw.Email:
 		// An email box beside a password box, a captcha and the like is not the
 		// plain email step: typing the email would not get the owner anywhere.

@@ -66,7 +66,7 @@ func (s *Service) driveLogin(ctx, tab context.Context, o LoginOptions) error {
 		say(msg + "\nFinish logging in in the browser window; muse-mcp waits for it.")
 	}
 
-	email, emailSent, tries, metaClicks := strings.TrimSpace(o.Email), false, 0, 0
+	email, emailSent, tries, metaClicks, chooseClicks := strings.TrimSpace(o.Email), false, 0, 0, 0
 	last := time.Now() // the last sign of progress
 	var page musepage.LoginPage
 	for {
@@ -105,6 +105,18 @@ func (s *Service) driveLogin(ctx, tab context.Context, o LoginOptions) error {
 			if ok, _ := musepage.ClickButton(op, musepage.LabelMeta, 2*time.Second); ok {
 				metaClicks++
 				s.o.Log.Info("terminal login: confirmed the Meta account screen", "try", metaClicks)
+				last = time.Now()
+			}
+			sleep(op, time.Second)
+		case musepage.StepChoose:
+			// "Use phone or email" opens the email box; a few clicks at most.
+			if chooseClicks >= maxMetaClicks {
+				giveUp(`the "Use phone or email" button does not open the email box`, p)
+				return nil
+			}
+			if ok, _ := musepage.ClickButton(op, musepage.LabelUseEmail, 2*time.Second); ok {
+				chooseClicks++
+				s.o.Log.Info("terminal login: chose phone or email", "try", chooseClicks)
 				last = time.Now()
 			}
 			sleep(op, time.Second)
