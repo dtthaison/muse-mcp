@@ -29,11 +29,14 @@ type Service interface {
 	ListChats() []chats.Chat
 }
 
-type statusIn struct{}
+type statusIn struct {
+	Account string `json:"account,omitempty" jsonschema:"muse account to use, from muse-mcp accounts; empty = the default account"`
+}
 
 // ImageArgs are the inputs of muse_generate_image (and of the CLI's image and
 // video commands).
 type ImageArgs struct {
+	Account         string   `json:"account,omitempty" jsonschema:"muse account to use, from muse-mcp accounts; empty = the default account"`
 	OutputPath      string   `json:"output_path" jsonschema:"where to save the image: a .png, .jpg/.jpeg or .webp path; relative paths resolve against the project directory"`
 	Prompt          string   `json:"prompt,omitempty" jsonschema:"what to make (needed unless change is given)"`
 	Change          string   `json:"change,omitempty" jsonschema:"the one thing to change while keeping characters, scene, lighting, framing and style identical"`
@@ -50,6 +53,7 @@ type ImageArgs struct {
 
 // videoIn has some of ImageArgs's fields; output_path's formats differ.
 type videoIn struct {
+	Account         string   `json:"account,omitempty" jsonschema:"muse account to use, from muse-mcp accounts; empty = the default account"`
 	OutputPath      string   `json:"output_path" jsonschema:"where to save the video: a .mp4 or .webm path; relative paths resolve against the project directory"`
 	Prompt          string   `json:"prompt,omitempty" jsonschema:"what to make (needed unless change is given)"`
 	Change          string   `json:"change,omitempty" jsonschema:"the one thing to change while keeping characters, scene, lighting, framing and style identical"`
@@ -64,6 +68,7 @@ type videoIn struct {
 
 // VoiceArgs are the inputs of muse_generate_speech (and the CLI's speech command).
 type VoiceArgs struct {
+	Account   string `json:"account,omitempty" jsonschema:"muse account to use, from muse-mcp accounts; empty = the default account"`
 	OutputDir string `json:"output_dir,omitempty" jsonschema:"folder to save the clip in (default: the project directory); the file is named <chat id>-<chat title>.mp3 after muse's chat"`
 	Text      string `json:"text" jsonschema:"the script: only the words to speak, written as they should sound (numbers, prices and dates in words; no links, emoji, markup, stage directions or speaker labels; Vietnamese with full tone marks)"`
 	Voice     string `json:"voice,omitempty" jsonschema:"a voice name from muse's catalog (see muse_list_voices), e.g. Helio or Aria; empty lets muse pick"`
@@ -100,6 +105,7 @@ type voicesOut struct {
 }
 
 type chatIn struct {
+	Account      string   `json:"account,omitempty" jsonschema:"muse account to use, from muse-mcp accounts; empty = the default account"`
 	Message      string   `json:"message" jsonschema:"what to say to muse"`
 	ChatID       string   `json:"chat_id,omitempty" jsonschema:"chat_id from an earlier result, to continue that conversation"`
 	Attachments  []string `json:"attachments,omitempty" jsonschema:"files to attach to the message"`
@@ -107,6 +113,7 @@ type chatIn struct {
 }
 
 type decideIn struct {
+	Account    string `json:"account,omitempty" jsonschema:"muse account to use, from muse-mcp accounts; empty = the default account"`
 	ChatID     string `json:"chat_id"`
 	ApprovalID string `json:"approval_id"`
 	Decision   string `json:"decision" jsonschema:"approve or deny, as the owner chose"`
@@ -131,7 +138,8 @@ type refsOut struct {
 }
 
 type chatIDIn struct {
-	ChatID string `json:"chat_id" jsonschema:"a chat_id from an earlier muse-mcp result or from muse_list_chats"`
+	Account string `json:"account,omitempty" jsonschema:"muse account to use, from muse-mcp accounts; empty = the default account"`
+	ChatID  string `json:"chat_id" jsonschema:"a chat_id from an earlier muse-mcp result or from muse_list_chats"`
 }
 
 type deletedOut struct {
@@ -161,10 +169,31 @@ const (
 	descDelRef    = `Delete a saved character or scene.`
 )
 
-// Register adds the muse tools to s.
+// ServiceSource gives the muse Service of an account. The empty name is the
+// default account. It is called on every tool call, so it should build the
+// service on first use and return the same one afterwards.
+type ServiceSource interface {
+	Service(account string) (Service, error)
+}
+
+type single struct{ svc Service }
+
+func (s single) Service(string) (Service, error) { return s.svc, nil }
+
+// Register adds the muse tools to s, all backed by one service (one account).
 func Register(s *mcp.Server, svc Service, lib *library.Store, cat *voices.Catalog) {
+	RegisterAccounts(s, single{svc}, lib, cat)
+}
+
+// RegisterAccounts adds the muse tools to s. Each muse tool takes an optional
+// account and runs on src's service for it.
+func RegisterAccounts(s *mcp.Server, src ServiceSource, lib *library.Store, cat *voices.Catalog) {
 	mcp.AddTool(s, &mcp.Tool{Name: "muse_status", Description: descStatus},
-		func(ctx context.Context, _ *mcp.CallToolRequest, _ statusIn) (*mcp.CallToolResult, muse.StatusInfo, error) {
+		func(ctx context.Context, _ *mcp.CallToolRequest, in statusIn) (*mcp.CallToolResult, muse.StatusInfo, error) {
+			svc, err := src.Service(in.Account)
+			if err != nil {
+				return nil, muse.StatusInfo{}, err
+			}
 			st, err := svc.Status(ctx)
 			return nil, st, err
 		})
@@ -172,6 +201,10 @@ func Register(s *mcp.Server, svc Service, lib *library.Store, cat *voices.Catalo
 	mcp.AddTool(s, &mcp.Tool{Name: "muse_generate_image", Description: descGenerate},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in ImageArgs) (*mcp.CallToolResult, muse.Result, error) {
 			req, err := BuildImageRequest(lib, in, muse.MediaImage)
+			if err != nil {
+				return nil, muse.Result{}, err
+			}
+			svc, err := src.Service(in.Account)
 			if err != nil {
 				return nil, muse.Result{}, err
 			}
@@ -188,6 +221,10 @@ func Register(s *mcp.Server, svc Service, lib *library.Store, cat *voices.Catalo
 			if err != nil {
 				return nil, muse.Result{}, err
 			}
+			svc, err := src.Service(in.Account)
+			if err != nil {
+				return nil, muse.Result{}, err
+			}
 			res, err := svc.GenerateImage(ctx, req)
 			return nil, res, err
 		})
@@ -195,6 +232,10 @@ func Register(s *mcp.Server, svc Service, lib *library.Store, cat *voices.Catalo
 	mcp.AddTool(s, &mcp.Tool{Name: "muse_generate_speech", Description: descVoice},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in VoiceArgs) (*mcp.CallToolResult, muse.Result, error) {
 			req, err := BuildVoiceRequest(in)
+			if err != nil {
+				return nil, muse.Result{}, err
+			}
+			svc, err := src.Service(in.Account)
 			if err != nil {
 				return nil, muse.Result{}, err
 			}
@@ -217,6 +258,10 @@ func Register(s *mcp.Server, svc Service, lib *library.Store, cat *voices.Catalo
 			if err != nil {
 				return nil, muse.Result{}, err
 			}
+			svc, err := src.Service(in.Account)
+			if err != nil {
+				return nil, muse.Result{}, err
+			}
 			res, err := svc.Chat(ctx, muse.ChatRequest{Message: in.Message, ChatID: in.ChatID,
 				Attachments: files, SaveImagesTo: in.SaveImagesTo})
 			return nil, res, err
@@ -227,12 +272,20 @@ func Register(s *mcp.Server, svc Service, lib *library.Store, cat *voices.Catalo
 			if in.Decision != "approve" && in.Decision != "deny" {
 				return nil, muse.Result{}, fmt.Errorf(`decision must be "approve" or "deny", not %q`, in.Decision)
 			}
+			svc, err := src.Service(in.Account)
+			if err != nil {
+				return nil, muse.Result{}, err
+			}
 			res, err := svc.Decide(ctx, in.ChatID, in.ApprovalID, in.Decision == "approve")
 			return nil, res, err
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "muse_delete_chat", Description: descDelChat},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in chatIDIn) (*mcp.CallToolResult, deletedOut, error) {
+			svc, err := src.Service(in.Account)
+			if err != nil {
+				return nil, deletedOut{}, err
+			}
 			if err := svc.DeleteChat(ctx, in.ChatID); err != nil {
 				return nil, deletedOut{}, err
 			}
@@ -240,7 +293,11 @@ func Register(s *mcp.Server, svc Service, lib *library.Store, cat *voices.Catalo
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "muse_list_chats", Description: descListChats},
-		func(context.Context, *mcp.CallToolRequest, statusIn) (*mcp.CallToolResult, chatsOut, error) {
+		func(_ context.Context, _ *mcp.CallToolRequest, in statusIn) (*mcp.CallToolResult, chatsOut, error) {
+			svc, err := src.Service(in.Account)
+			if err != nil {
+				return nil, chatsOut{}, err
+			}
 			return nil, chatsOut{Chats: svc.ListChats()}, nil
 		})
 

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dtthaison/muse-mcp/internal/accounts"
 	"github.com/dtthaison/muse-mcp/internal/chats"
 	"github.com/dtthaison/muse-mcp/internal/library"
 	"github.com/dtthaison/muse-mcp/internal/muse"
@@ -86,13 +87,17 @@ type harness struct {
 	home, dir   string
 	claudeErr   func(args []string) error
 	chats       *chats.Registry
+	accounts    *accounts.Store
+	started     []string // accounts muse was started for
+	chatsFor    []string // accounts whose chat list was read
 }
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	return &harness{svc: &fakeService{result: muse.Result{Status: "done", ChatID: "c1", ChatURL: "https://muse.ai/thread/c1", Reply: "Here you go."}},
 		lib: library.Open(filepath.Join(t.TempDir(), "library")), voices: voices.Open(filepath.Join(t.TempDir(), "voices.csv")),
-		home: t.TempDir(), dir: t.TempDir(), chats: chats.Load(filepath.Join(t.TempDir(), "chats.json"))}
+		home: t.TempDir(), dir: t.TempDir(), chats: chats.Load(filepath.Join(t.TempDir(), "chats.json")),
+		accounts: accounts.Open(filepath.Join(t.TempDir(), "accounts.json"))}
 }
 
 func (h *harness) run(stdin string, interactive bool, args ...string) int {
@@ -100,8 +105,10 @@ func (h *harness) run(stdin string, interactive bool, args ...string) int {
 	h.errOut.Reset()
 	return Run(context.Background(), args, Env{
 		Stdin: strings.NewReader(stdin), Stdout: &h.out, Stderr: &h.errOut, Interactive: interactive,
-		Library: h.lib, Voices: h.voices, Chats: h.chats,
-		Muse: func() (Service, func(), error) {
+		Library: h.lib, Voices: h.voices, Accounts: h.accounts,
+		Chats: func(account string) *chats.Registry { h.chatsFor = append(h.chatsFor, account); return h.chats },
+		Muse: func(account string) (Service, func(), error) {
+			h.started = append(h.started, account)
 			return h.svc, func() { h.svc.closed = true }, nil
 		},
 		Serve: func(context.Context) error { h.served = true; return nil },
@@ -367,7 +374,7 @@ func TestReferenceCommandsDontStartMuse(t *testing.T) {
 	h := newHarness(t)
 	started := false
 	code := Run(context.Background(), []string{"refs", "list"}, Env{Stdout: &h.out, Stderr: &h.errOut, Library: h.lib,
-		Muse: func() (Service, func(), error) { started = true; return h.svc, func() {}, nil }})
+		Muse: func(string) (Service, func(), error) { started = true; return h.svc, func() {}, nil }})
 	if code != 0 || started {
 		t.Fatalf("code=%d started=%v", code, started)
 	}
@@ -383,7 +390,7 @@ func TestStatusBeforeChromeStarts(t *testing.T) {
 	h := newHarness(t)
 	var out bytes.Buffer
 	code := Run(context.Background(), []string{"status"}, Env{Stdout: &out, Stderr: &h.errOut, Library: h.lib,
-		Muse: func() (Service, func(), error) { return &coldService{}, func() {}, nil }})
+		Muse: func(string) (Service, func(), error) { return &coldService{}, func() {}, nil }})
 	if code != 0 || !strings.Contains(out.String(), "logged in: unknown") {
 		t.Fatalf("code=%d stdout=%q", code, out.String())
 	}

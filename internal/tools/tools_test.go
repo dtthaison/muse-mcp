@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/png"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -391,5 +393,124 @@ func TestListChats(t *testing.T) {
 	res, text := call(t, cs, "muse_list_chats", map[string]any{})
 	if res.IsError || !strings.Contains(text, `"id":"c1"`) || !strings.Contains(text, "2026-10-29T05:00:00Z") {
 		t.Fatalf("%v %s", res.IsError, text)
+	}
+}
+
+// accountSource hands each account its own fake service, as the server does.
+type accountSource struct {
+	svcs  map[string]*fakeService
+	asked []string
+}
+
+func (a *accountSource) Service(name string) (Service, error) {
+	a.asked = append(a.asked, name)
+	if name == "" {
+		name = "main"
+	}
+	s, ok := a.svcs[name]
+	if !ok {
+		return nil, fmt.Errorf("unknown muse account %q; known accounts: main, sg1", name)
+	}
+	return s, nil
+}
+
+func connectAccounts(t *testing.T, src ServiceSource) *mcp.ClientSession {
+	t.Helper()
+	ctx := context.Background()
+	server := mcp.NewServer(&mcp.Implementation{Name: "muse-mcp", Version: "test"}, nil)
+	RegisterAccounts(server, src, library.Open(t.TempDir()), voices.Open(filepath.Join(t.TempDir(), "voices.csv")))
+	ct, st := mcp.NewInMemoryTransports()
+	if _, err := server.Connect(ctx, st, nil); err != nil {
+		t.Fatal(err)
+	}
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, nil).Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cs.Close() })
+	return cs
+}
+
+func TestEveryMuseToolTakesAnAccount(t *testing.T) {
+	_, _, cs := setup(t)
+	res, err := cs.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	museTools := map[string]bool{"muse_chat": true, "muse_decide_approval": true, "muse_delete_chat": true, "muse_generate_image": true,
+		"muse_generate_speech": true, "muse_generate_video": true, "muse_list_chats": true, "muse_status": true}
+	for _, tool := range res.Tools {
+		b, _ := json.Marshal(tool.InputSchema)
+		var schema struct {
+			Properties map[string]struct {
+				Description string `json:"description"`
+			} `json:"properties"`
+			Required []string `json:"required"`
+		}
+		if err := json.Unmarshal(b, &schema); err != nil {
+			t.Fatal(err)
+		}
+		prop, has := schema.Properties["account"]
+		if has != museTools[tool.Name] {
+			t.Errorf("%s: account input present=%v, want %v", tool.Name, has, museTools[tool.Name])
+		}
+		if has && prop.Description != "muse account to use, from muse-mcp accounts; empty = the default account" {
+			t.Errorf("%s: account description %q", tool.Name, prop.Description)
+		}
+		for _, r := range schema.Required {
+			if r == "account" {
+				t.Errorf("%s: account is required", tool.Name)
+			}
+		}
+	}
+}
+
+func TestToolsRouteToTheNamedAccount(t *testing.T) {
+	src := &accountSource{svcs: map[string]*fakeService{"main": {}, "sg1": {}}}
+	cs := connectAccounts(t, src)
+	if res, text := call(t, cs, "muse_generate_image", map[string]any{"output_path": "a.png", "prompt": "fox", "account": "sg1"}); res.IsError {
+		t.Fatal(text)
+	}
+	if res, text := call(t, cs, "muse_chat", map[string]any{"message": "hi"}); res.IsError {
+		t.Fatal(text)
+	}
+	if res, text := call(t, cs, "muse_delete_chat", map[string]any{"chat_id": "c9", "account": "sg1"}); res.IsError {
+		t.Fatal(text)
+	}
+	if res, text := call(t, cs, "muse_decide_approval", map[string]any{"chat_id": "c", "approval_id": "a", "decision": "deny", "account": "sg1"}); res.IsError {
+		t.Fatal(text)
+	}
+	if res, text := call(t, cs, "muse_list_chats", map[string]any{"account": "sg1"}); res.IsError {
+		t.Fatal(text)
+	}
+	if res, text := call(t, cs, "muse_status", map[string]any{"account": "main"}); res.IsError {
+		t.Fatal(text)
+	}
+	sg1, main := src.svcs["sg1"], src.svcs["main"]
+	if len(sg1.images) != 1 || len(sg1.deleted) != 1 || len(main.chats) != 1 || len(main.images) != 0 || len(sg1.chats) != 0 {
+		t.Fatalf("sg1 images=%d deleted=%d chats=%d; main images=%d chats=%d", len(sg1.images), len(sg1.deleted), len(sg1.chats), len(main.images), len(main.chats))
+	}
+	want := []string{"sg1", "", "sg1", "sg1", "sg1", "main"}
+	if !reflect.DeepEqual(src.asked, want) {
+		t.Fatalf("accounts asked for %q, want %q", src.asked, want)
+	}
+}
+
+func TestUnknownAccountIsAToolErrorListingTheKnownOnes(t *testing.T) {
+	src := &accountSource{svcs: map[string]*fakeService{"main": {}, "sg1": {}}}
+	cs := connectAccounts(t, src)
+	for _, c := range []struct {
+		tool string
+		args map[string]any
+	}{
+		{"muse_status", map[string]any{"account": "nope"}},
+		{"muse_generate_image", map[string]any{"output_path": "a.png", "prompt": "fox", "account": "nope"}},
+		{"muse_chat", map[string]any{"message": "hi", "account": "nope"}},
+		{"muse_list_chats", map[string]any{"account": "nope"}},
+	} {
+		res, text := call(t, cs, c.tool, c.args)
+		if !res.IsError || !strings.Contains(text, `unknown muse account "nope"`) || !strings.Contains(text, "main, sg1") {
+			t.Errorf("%s: isError=%v text=%q", c.tool, res.IsError, text)
+		}
 	}
 }

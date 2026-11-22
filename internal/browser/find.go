@@ -8,13 +8,9 @@ import (
 	"github.com/dtthaison/muse-mcp/internal/config"
 )
 
-// FindChrome returns the Chrome binary to launch: nothing when MUSE_CDP_URL
-// attaches to a running browser, else MUSE_CHROME or the macOS
+// FindChrome returns the Chrome binary to launch: MUSE_CHROME or the macOS
 // default if it exists, else a Chrome or Chromium on PATH.
 func FindChrome() (string, error) {
-	if config.RemoteURL() != "" {
-		return "", nil // attaching to a running browser; nothing to launch
-	}
 	if p := config.ChromePath(); fileExists(p) {
 		return p, nil
 	}

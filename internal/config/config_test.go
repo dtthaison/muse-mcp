@@ -59,3 +59,35 @@ func TestChromePathOverride(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestAccountPaths(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("MUSE_MCP_HOME", root)
+	p, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.AccountsFile() != filepath.Join(root, "accounts.json") {
+		t.Fatalf("accounts file %s", p.AccountsFile())
+	}
+	// "default" keeps the paths of versions before accounts.
+	d, err := p.Account("default")
+	if err != nil || d.Profile != filepath.Join(root, "chrome-profile") || d.Chats != filepath.Join(root, "chats.json") || d.Lock != filepath.Join(root, "lock") {
+		t.Fatalf("default: %+v %v", d, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "accounts")); err == nil {
+		t.Fatal("the default account created accounts/")
+	}
+	a, err := p.Account("sg1")
+	dir := filepath.Join(root, "accounts", "sg1")
+	if err != nil || a.Profile != filepath.Join(dir, "chrome-profile") || a.Chats != filepath.Join(dir, "chats.json") || a.Lock != filepath.Join(dir, "lock") {
+		t.Fatalf("sg1: %+v %v", a, err)
+	}
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() || fi.Mode().Perm() != 0o700 {
+		t.Fatalf("account dir: %v", err)
+	}
+	// library, voices and log stay shared
+	if p.Library != filepath.Join(root, "library") || p.Voices != filepath.Join(root, "voices.csv") {
+		t.Fatalf("shared paths moved: %+v", p)
+	}
+}

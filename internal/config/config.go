@@ -20,6 +20,38 @@ type Paths struct {
 	Lock    string // keeps a second muse-mcp off the same profile
 }
 
+// AccountsFile is accounts.json: the muse accounts and the browser each uses.
+func (p Paths) AccountsFile() string { return filepath.Join(p.Root, "accounts.json") }
+
+// DefaultAccount is the account that exists with no accounts.json: Chrome on
+// this computer, with the state files at the root as in versions before accounts.
+const DefaultAccount = "default"
+
+// AccountPaths is the per-account state: what two accounts never share.
+type AccountPaths struct {
+	Profile string // Chrome profile (used by the local browser)
+	Chats   string // chats.json
+	Lock    string // keeps a second muse-mcp off this account
+}
+
+// Account returns the state paths of the named account. "default" keeps the
+// root paths for backward compatibility; any other account lives in
+// Root/accounts/NAME, created here. The caller has checked the name.
+func (p Paths) Account(name string) (AccountPaths, error) {
+	if name == DefaultAccount {
+		return AccountPaths{Profile: p.Profile, Chats: p.Chats, Lock: p.Lock}, nil
+	}
+	dir := filepath.Join(p.Root, "accounts", name)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return AccountPaths{}, err
+	}
+	return AccountPaths{
+		Profile: filepath.Join(dir, "chrome-profile"),
+		Chats:   filepath.Join(dir, "chats.json"),
+		Lock:    filepath.Join(dir, "lock"),
+	}, nil
+}
+
 // Load resolves the state root from MUSE_MCP_HOME (or ~/.muse-mcp) and creates
 // the root and library directories.
 func Load() (Paths, error) {

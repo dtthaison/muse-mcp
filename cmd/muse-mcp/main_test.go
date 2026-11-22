@@ -1,8 +1,19 @@
 package main
 
 import (
+	"context"
+	"io"
+	"log/slog"
 	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/dtthaison/muse-mcp/internal/accounts"
+	"github.com/dtthaison/muse-mcp/internal/config"
+	"github.com/dtthaison/muse-mcp/internal/muse"
+	"github.com/dtthaison/muse-mcp/internal/tools"
 )
 
 // /dev/null is a character device but not a terminal: a command run by a script has it as stdin
@@ -27,5 +38,136 @@ func TestPipeIsNotATerminal(t *testing.T) {
 	defer w.Close()
 	if isTerminal(r) {
 		t.Fatal("a pipe counted as a terminal")
+	}
+}
+
+func testPaths(t *testing.T) config.Paths {
+	t.Helper()
+	t.Setenv("MUSE_MCP_HOME", t.TempDir())
+	p, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func testLog() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
+
+// The pool builds one service per account, only when first asked, and shuts all of them down.
+func TestPoolBuildsAccountsLazily(t *testing.T) {
+	store := accounts.Open(filepath.Join(t.TempDir(), "accounts.json"))
+	if err := store.Save(accounts.File{Default: "sg1", Accounts: map[string]accounts.Account{
+		"sg1": {Browser: "cdp:http://127.0.0.1:1"}, "y": {Browser: "cdp:http://127.0.0.1:2"}}}); err != nil {
+		t.Fatal(err)
+	}
+	var built, closed []string
+	pl := &pool{store: store, build: func(name string, acc accounts.Account) (tools.Service, func(), error) {
+		built = append(built, name+"="+acc.Browser)
+		return unavailable{}, func() { closed = append(closed, name) }, nil
+	}}
+	if len(built) != 0 {
+		t.Fatal("built before first use")
+	}
+	a, err := pl.Service("") // the default account is sg1
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := pl.Service("sg1"); b != a {
+		t.Fatal("a second call built a second service")
+	}
+	if _, err := pl.Service("y"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pl.Service("default"); err != nil { // the implicit local account
+		t.Fatal(err)
+	}
+	want := []string{"sg1=cdp:http://127.0.0.1:1", "y=cdp:http://127.0.0.1:2", "default=local"}
+	if !reflect.DeepEqual(built, want) {
+		t.Fatalf("built %v, want %v", built, want)
+	}
+	pl.Close()
+	if len(closed) != 3 {
+		t.Fatalf("closed %v", closed)
+	}
+}
+
+func TestPoolUnknownAccountListsKnownOnes(t *testing.T) {
+	store := accounts.Open(filepath.Join(t.TempDir(), "accounts.json"))
+	store.Save(accounts.File{Accounts: map[string]accounts.Account{"sg1": {Browser: "local"}}})
+	pl := &pool{store: store, build: func(string, accounts.Account) (tools.Service, func(), error) {
+		t.Fatal("built an unknown account")
+		return nil, nil, nil
+	}}
+	_, err := pl.Service("nope")
+	if err == nil || !strings.Contains(err.Error(), `unknown muse account "nope"`) || !strings.Contains(err.Error(), "default, sg1") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+// A new account added by the CLI while the server runs is usable without a restart.
+func TestPoolSeesAccountsAddedLater(t *testing.T) {
+	store := accounts.Open(filepath.Join(t.TempDir(), "accounts.json"))
+	pl := &pool{store: store, build: func(string, accounts.Account) (tools.Service, func(), error) { return unavailable{}, nil, nil }}
+	if _, err := pl.Service("late"); err == nil {
+		t.Fatal("unknown account accepted")
+	}
+	store.Save(accounts.File{Accounts: map[string]accounts.Account{"late": {Browser: "local"}}})
+	if _, err := pl.Service("late"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNewMuseUsesPerAccountState(t *testing.T) {
+	paths := testPaths(t)
+	s, closeFn, err := newMuse(paths, "sg1", accounts.Account{Browser: "cdp:http://127.0.0.1:1"}, true, testLog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeFn()
+	st, err := s.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Account != "sg1" || st.Browser != "cdp:http://127.0.0.1:1" || st.ChromeRunning {
+		t.Fatalf("status %+v", st)
+	}
+	if fi, err := os.Stat(filepath.Join(paths.Root, "accounts", "sg1")); err != nil || !fi.IsDir() {
+		t.Fatalf("per-account directory: %v", err)
+	}
+	// the default account keeps the root paths: no accounts/ directory for it
+	d, closeD, err := newMuse(paths, "default", accounts.Account{Browser: "cdp:http://127.0.0.1:2"}, true, testLog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeD()
+	if _, err := os.Stat(filepath.Join(paths.Root, "accounts", "default")); err == nil {
+		t.Fatal("the default account got a directory under accounts/")
+	}
+	var _ *muse.Service = d
+}
+
+func TestMuseCDPURLOverridesTheAccountsBrowser(t *testing.T) {
+	paths := testPaths(t)
+	t.Setenv("MUSE_CDP_URL", "http://127.0.0.1:9333")
+	s, closeFn, err := newMuse(paths, "sg1", accounts.Account{Browser: "shardx:x"}, true, testLog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeFn()
+	st, _ := s.Status(context.Background())
+	if st.Browser != "cdp:http://127.0.0.1:9333" || st.Account != "sg1" {
+		t.Fatalf("status %+v", st)
+	}
+	t.Setenv("MUSE_CDP_URL", "not-a-url")
+	if _, _, err := newMuse(paths, "sg1", accounts.Account{}, true, testLog()); err == nil || !strings.Contains(err.Error(), "MUSE_CDP_URL") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestNewMuseReportsABadAccountBrowser(t *testing.T) {
+	paths := testPaths(t)
+	_, _, err := newMuse(paths, "sg1", accounts.Account{Browser: "cdp:nope"}, true, testLog())
+	if err == nil || !strings.Contains(err.Error(), "account sg1") {
+		t.Fatalf("error = %v", err)
 	}
 }

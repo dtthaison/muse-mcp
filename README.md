@@ -119,6 +119,11 @@ again." The window hides itself once muse.ai shows your chats.
 | `muse_save_reference` / `muse_list_references` / `muse_delete_reference` | Saved characters and scenes. |
 | `muse_status` | Whether Chrome is running, whether you're logged in, and pending approvals. |
 
+Every tool that talks to muse or lists its chats (all of them except
+`muse_list_voices` and the three reference tools) takes an optional `account`:
+the muse account to use, from `muse-mcp accounts`. Empty means the default
+account. See [External browsers](#external-browsers).
+
 ### Keeping a character or scene consistent
 
 Save it once:
@@ -171,6 +176,9 @@ muse-mcp chats forget <chat_id>      # drop one from the list (muse untouched)
 muse-mcp refs save fox --kind character --desc "a red fox with a white chest" fox.png
 muse-mcp refs list
 muse-mcp status
+muse-mcp image --account sg1 -o a.png "a cat"   # another muse account, see below
+muse-mcp accounts                    # the accounts, the browser each uses, the default
+muse-mcp browsers                    # the kinds of browser an account can use
 ```
 
 `muse-mcp help` lists every command and flag; `--json` prints the raw result.
@@ -325,19 +333,136 @@ approved). Open the chat in muse.ai to decide them there.
 Everything lives in `~/.muse-mcp/` (override with `MUSE_MCP_HOME`):
 `chrome-profile/` (your muse login), `library/` (saved references),
 `voices.csv` (a voice catalog you imported, if any), `chats.json` (the chats muse-mcp
-started), `muse-mcp.log`.
+started), `muse-mcp.log`, and `accounts.json` if you use more than one account.
+Those are the files of the account called `default`. Any other account keeps
+its own `chrome-profile/`, `chats.json` and `lock` in `accounts/<name>/`;
+`library/`, `voices.csv` and the log are shared.
 
-## Using a browser that runs elsewhere
+## External browsers
 
-Set `MUSE_CDP_URL` to the DevTools address of a Chrome that already runs
-(`http://127.0.0.1:9222` or `ws://…/devtools/browser/…`) and muse-mcp attaches to
-it instead of starting its own Chrome, for example a profile in an anti-detect
-browser on another machine, reached through an SSH tunnel. Log in to muse in that
-browser's own window (`muse-mcp login` opens muse.ai there and waits). muse-mcp
-never closes that browser; the hidden or visible window is up to whoever shows
-it. Give each account its own `MUSE_MCP_HOME`, so their chats, references and
-lock stay apart. The DevTools port gives full control of that browser: keep it
-on localhost and tunnel it, never expose it.
+By default muse-mcp starts its own Chrome with its own profile. An account can
+instead use a browser that someone else runs, such as an anti-detect browser
+profile on another machine, and you can keep several muse accounts, each in its
+own browser. muse-mcp itself knows no vendor: it speaks the DevTools protocol to
+an address, and a small *provider* program can find that address for it.
+
+```
+muse-mcp browsers
+  local     Chrome on this computer                    (built in)
+  cdp       a browser at a DevTools address you give   (built in)
+  shardx    ShardX profiles                            (muse-browser-shardx, on PATH)
+
+muse-mcp login --account sg1 --browser shardx:muse-sg-1
+muse-mcp login --account x --browser cdp:http://127.0.0.1:9222
+muse-mcp login --account y --browser-cmd "some-tool --flag arg"     # expert escape hatch
+muse-mcp image --account sg1 -o a.png "a cat"
+muse-mcp accounts                     # name, browser, and * for the default
+muse-mcp accounts default sg1
+muse-mcp accounts remove sg1          # removes the entry only; never touches muse or the browser
+```
+
+### Browser specs
+
+| Spec | Meaning |
+|---|---|
+| `local` | Chrome on this computer, started by muse-mcp with its own profile (today's behavior). |
+| `cdp:<url>` | Attach to the browser at that DevTools address (`http://host:port` or `ws://…/devtools/browser/…`). |
+| `<name>:<arg>` | Run the provider `muse-browser-<name>` (found on `PATH`) as `muse-browser-<name> <arg>`. |
+| `--browser-cmd "…"` | A provider command of your own. It is split with shell-like quotes and run without a shell; the contract is the same as for a provider. |
+
+`login --browser SPEC` (or `--browser-cmd`) checks the spec, saves it for the
+account, and then logs in as usual. Without `--account` it applies to the
+default account. `muse-mcp browsers` lists the built-in kinds and every
+`muse-browser-*` program on `PATH`.
+
+### Accounts
+
+With no `accounts.json` there is one account, `default`, using `local`: exactly
+what muse-mcp did before accounts. `accounts.json` lives in `~/.muse-mcp/` (or
+`MUSE_MCP_HOME`), mode 0600:
+
+```json
+{"default": "sg1", "accounts": {"sg1": {"browser": "shardx:muse-sg-1"}, "y": {"command": ["some-tool", "--flag", "arg"]}}}
+```
+
+- A name is 1 to 32 characters of `[a-z0-9_-]`, starting with a letter or digit.
+- `--account NAME` works on every command that uses muse (`login`, `status`,
+  `image`, `video`, `speech`, `chat`, `chats`); without it the file's `default`
+  is used, else `default`. The account called `default` exists even when the
+  file doesn't list it.
+- `default` keeps the old paths. Other accounts live in `accounts/<name>/`, each
+  with its own `chrome-profile/`, `chats.json` and `lock`, so one account's chats
+  are never mixed with another's, and a second muse-mcp can use account B while
+  the first uses A.
+- The MCP server serves all accounts. Each muse tool takes an optional `account`,
+  and the server starts that account's browser on first use. An unknown account
+  is an error that lists the known ones. `muse_status` says which account it
+  describes.
+- `MUSE_CDP_URL`, if set, still replaces the browser of whichever account is used,
+  for one run (`MUSE_CDP_URL=http://127.0.0.1:9222 muse-mcp status`).
+- muse-mcp never closes an attached browser: it drops the connection and, for a
+  provider, stops the provider. Whether the window is shown is up to whoever runs
+  that browser, so hidden and visible modes change nothing there. Log in to muse
+  in that browser's own window (`muse-mcp login` opens muse.ai there and waits).
+
+### Provider contract
+
+A provider is an executable named `muse-browser-<name>` on `PATH`.
+
+1. `muse-browser-<name> --describe` prints one line saying what it is and exits
+   0. `muse-mcp browsers` runs it with a 3 second limit; if it fails or is slow
+   the name is shown with "(no description)".
+2. A normal run is `muse-browser-<name> <arg>` (or the `--browser-cmd` command).
+   muse-mcp starts it with stdin as a pipe, stdout piped and stderr captured. It
+   prints the DevTools address (`http://host:port` or
+   `ws://…/devtools/browser/…`) as the **first line of stdout**, then keeps
+   running (it may hold an SSH tunnel) until its **stdin reaches EOF** or it gets
+   **SIGTERM**. Everything else it prints on stdout is ignored; log to stderr.
+3. muse-mcp waits up to **90 seconds** for that line. If the provider exits first,
+   or time runs out, the error shows its exit code and the last 20 lines of its
+   stderr.
+4. On disconnect, stop or exit, muse-mcp closes the provider's stdin, sends
+   SIGTERM (a provider that exits on EOF gets a moment to), waits up to 5
+   seconds, then sends SIGKILL, and reaps it. When a connection has died, the next
+   muse call runs the provider again, because the DevTools port may have changed.
+5. muse-mcp never closes the browser itself: shutting down a browser is the
+   provider's business, and a provider that attaches to someone's browser should
+   leave it running.
+6. An unknown provider is reported as
+   `no browser provider "shardx": install muse-browser-shardx (see README › External browsers), or run muse-mcp browsers to see what you have`.
+
+A provider in 15 lines of `sh`, for a Chrome you start yourself on port 9222
+(muse-mcp runs it as `muse-browser-ssh user@host`):
+
+```sh
+#!/bin/sh
+# muse-browser-ssh: reach a Chrome running with --remote-debugging-port=9222 on another machine.
+[ "$1" = "--describe" ] && { echo "Chrome on another machine, over an SSH tunnel (arg: user@host)"; exit 0; }
+host=$1; port=19222
+ssh -N -L "127.0.0.1:$port:127.0.0.1:9222" -o ExitOnForwardFailure=yes "$host" &
+tunnel=$!
+trap 'kill $tunnel 2>/dev/null; exit 0' TERM INT
+for _ in 1 2 3 4 5 6 7 8 9 10; do                # wait for the tunnel
+  curl -sf "http://127.0.0.1:$port/json/version" >/dev/null && break
+  kill -0 $tunnel 2>/dev/null || { echo "ssh tunnel to $host failed" >&2; exit 1; }
+  sleep 1
+done
+echo "http://127.0.0.1:$port"                     # first line of stdout: the DevTools address
+while read -r _; do :; done                       # keep running until stdin reaches EOF
+kill $tunnel 2>/dev/null
+```
+
+Make it executable (`chmod +x`), put it on `PATH`, then
+`muse-mcp login --account remote --browser ssh:user@host`.
+
+### Security
+
+A DevTools port gives full control of that browser: every tab, cookie and
+password in it. Keep it on localhost or behind a tunnel, never on a public
+address, and don't share one browser between people. Use one real muse account
+per person and follow muse's terms: accounts here exist so your own accounts
+(for example a personal and a business one) don't mix, not to create accounts in
+bulk or get around muse's limits.
 
 ## Development
 

@@ -66,6 +66,9 @@ type Options struct {
 	Timing  Timing
 	Log     *slog.Logger
 	Now     func() time.Time
+	// Account and BrowserSpec name the muse account and its browser, for Status.
+	Account     string
+	BrowserSpec string
 }
 
 type ImageRequest struct {
@@ -102,6 +105,8 @@ type Result struct {
 }
 
 type StatusInfo struct {
+	Account       string            `json:"account,omitempty"`
+	Browser       string            `json:"browser,omitempty"`
 	ChromeRunning bool              `json:"chrome_running"`
 	Visible       bool              `json:"window_visible"`
 	LoggedIn      bool              `json:"logged_in"`
@@ -324,6 +329,8 @@ func (s *Service) Status(ctx context.Context) (StatusInfo, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := StatusInfo{
+		Account:       s.o.Account,
+		Browser:       s.o.BrowserSpec,
 		ChromeRunning: s.o.Browser.Running(),
 		Visible:       s.o.Browser.Visible(),
 		LoggedIn:      s.loggedIn,

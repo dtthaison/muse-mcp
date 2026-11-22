@@ -16,6 +16,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/dtthaison/muse-mcp/internal/accounts"
+	"github.com/dtthaison/muse-mcp/internal/browser"
 	"github.com/dtthaison/muse-mcp/internal/chats"
 	"github.com/dtthaison/muse-mcp/internal/library"
 	"github.com/dtthaison/muse-mcp/internal/muse"
@@ -40,8 +42,9 @@ type Env struct {
 	Interactive bool // stdin is a terminal, so approvals can be asked
 	Library     *library.Store
 	Voices      *voices.Catalog
-	Chats       *chats.Registry                                 // chats muse-mcp started, for listing
-	Muse        func() (Service, func(), error)                 // starts Chrome; the func shuts it down
+	Accounts    *accounts.Store                                 // accounts.json; nil means only the implicit default account
+	Chats       func(account string) *chats.Registry            // chats muse-mcp started for an account, for listing
+	Muse        func(account string) (Service, func(), error)   // starts the account's browser; the func shuts it down
 	Serve       func(ctx context.Context) error                 // the MCP server on stdio
 	Claude      func(ctx context.Context, args ...string) error // runs the claude CLI
 	Exe         string                                          // this binary, for install
@@ -64,8 +67,21 @@ Usage:
   muse-mcp                       run the MCP server (what Claude Code starts)
   muse-mcp install [--scope S]   add muse-mcp to Claude Code (scope user, project or local; default user)
   muse-mcp uninstall [--scope S] remove it from Claude Code
-  muse-mcp login                 open muse.ai and wait until you are logged in
-  muse-mcp status                Chrome, login and pending approvals
+  muse-mcp login [--account N] [--browser SPEC | --browser-cmd "CMD ARGS"]
+                                 open muse.ai and wait until you are logged in; with --browser
+                                 (or --browser-cmd) it first saves which browser account N uses
+  muse-mcp status                the browser, login and pending approvals
+
+  muse-mcp accounts              the muse accounts and the browser each one uses
+  muse-mcp accounts default N    use account N when --account is not given
+  muse-mcp accounts remove N     forget account N (muse and its browser are not touched)
+  muse-mcp browsers              the kinds of browser an account can use
+
+Every command that uses muse (login, status, image, video, speech, chat, chats) takes
+--account NAME. Without it the default account is used (the one called "default", which
+is Chrome on this computer, until "accounts default" says otherwise). A browser SPEC is
+local, cdp:URL (a DevTools address, e.g. cdp:http://127.0.0.1:9222) or NAME:ARG, which
+runs the provider program muse-browser-NAME with ARG (see README, External browsers).
 
   muse-mcp image -o OUT.png [flags] PROMPT
   muse-mcp video -o OUT.mp4 [flags] PROMPT     (experimental, not yet tested end to end)
@@ -106,6 +122,10 @@ approved.
 // Run runs one command and returns the process exit code.
 func Run(ctx context.Context, args []string, env Env) int {
 	r := &runner{env: env, in: bufio.NewReader(orEmpty(env.Stdin))}
+	args, err := r.globalAccount(args)
+	if err != nil {
+		return r.usageErr("%v", err)
+	}
 	if len(args) == 0 {
 		if env.Interactive {
 			fmt.Fprint(env.Stderr, usage)
@@ -119,16 +139,13 @@ func Run(ctx context.Context, args []string, env Env) int {
 	case "install", "uninstall":
 		return r.install(ctx, cmd, rest)
 	case "login":
-		return r.withMuse(func(svc Service) int {
-			fmt.Fprintln(env.Stderr, "Opening muse.ai. If a Chrome window appears, log in there.")
-			if err := svc.Login(ctx); err != nil {
-				return r.fail(err)
-			}
-			fmt.Fprintln(env.Stdout, "Logged in to muse.ai.")
-			return exitOK
-		})
+		return r.login(ctx, rest)
 	case "status":
-		return r.withMuse(func(svc Service) int { return r.status(ctx, svc) })
+		return r.statusCmd(ctx, rest)
+	case "accounts":
+		return r.accounts(rest)
+	case "browsers":
+		return r.browsers(rest)
 	case "image", "video":
 		return r.generate(ctx, cmd, rest)
 	case "speech":
@@ -154,8 +171,49 @@ func Run(ctx context.Context, args []string, env Env) int {
 }
 
 type runner struct {
-	env Env
-	in  *bufio.Reader
+	env     Env
+	in      *bufio.Reader
+	account string // from a --account before the command name
+}
+
+// globalAccount takes a leading --account NAME (before the command name).
+func (r *runner) globalAccount(args []string) ([]string, error) {
+	if len(args) == 0 {
+		return args, nil
+	}
+	for _, p := range []string{"--account", "-account"} {
+		if args[0] == p {
+			if len(args) < 2 {
+				return nil, errors.New("--account needs a name")
+			}
+			r.account = args[1]
+			return args[2:], nil
+		}
+		if v, ok := strings.CutPrefix(args[0], p+"="); ok {
+			r.account = v
+			return args[1:], nil
+		}
+	}
+	return args, nil
+}
+
+// accountFlag adds --account to fs.
+func (r *runner) accountFlag(fs *flag.FlagSet) *string {
+	return fs.String("account", "", "muse account (see muse-mcp accounts)")
+}
+
+// resolve returns the account a command works on: the command's own
+// --account, else the one before the command name, else the default.
+func (r *runner) resolve(flagValue string) (string, error) {
+	f, err := r.env.Accounts.Load()
+	if err != nil {
+		return "", err
+	}
+	if flagValue == "" {
+		flagValue = r.account
+	}
+	name, _, err := f.Resolve(flagValue)
+	return name, err
 }
 
 func orEmpty(r io.Reader) io.Reader {
@@ -179,8 +237,12 @@ func (r *runner) usageErr(format string, a ...any) int {
 }
 
 // withMuse starts muse (Chrome) for one command and always shuts it down.
-func (r *runner) withMuse(f func(Service) int) int {
-	svc, closeMuse, err := r.env.Muse()
+func (r *runner) withMuse(account string, f func(Service) int) int {
+	name, err := r.resolve(account)
+	if err != nil {
+		return r.fail(err)
+	}
+	svc, closeMuse, err := r.env.Muse(name)
 	if err != nil {
 		return r.fail(err)
 	}
@@ -330,6 +392,19 @@ func removeSkillFiles(dir string, names []string, files func(string) ([]string, 
 	return nil
 }
 
+func (r *runner) statusCmd(ctx context.Context, args []string) int {
+	fs := r.newFlags("status")
+	account := r.accountFlag(fs)
+	rest, err := parse(fs, args)
+	if err != nil {
+		return exitUsage
+	}
+	if len(rest) > 0 {
+		return r.usageErr("status takes no arguments")
+	}
+	return r.withMuse(*account, func(svc Service) int { return r.status(ctx, svc) })
+}
+
 func (r *runner) status(ctx context.Context, svc Service) int {
 	st, err := svc.Status(ctx)
 	if err != nil {
@@ -346,6 +421,12 @@ func (r *runner) status(ctx context.Context, svc Service) int {
 		login = "unknown (muse.ai isn't open yet; `muse-mcp login` checks)"
 	}
 	out := r.env.Stdout
+	if st.Account != "" {
+		fmt.Fprintf(out, "account: %s\n", st.Account)
+	}
+	if st.Browser != "" {
+		fmt.Fprintf(out, "browser: %s\n", st.Browser)
+	}
 	fmt.Fprintf(out, "chrome running: %s\nlogged in: %s\ntracked chats: %d\n", yes(st.ChromeRunning), login, st.TrackedChats)
 	for _, p := range st.Pending {
 		fmt.Fprintf(out, "pending approval %s in chat %s: %s\n", p.ID, p.ChatID, p.Text)
@@ -369,6 +450,7 @@ func (r *runner) generate(ctx context.Context, cmd string, args []string) int {
 	fs.StringVar(&a.AspectRatio, "aspect", "", "")
 	fs.IntVar(&a.Count, "count", 0, "")
 	asJSON := fs.Bool("json", false, "")
+	account := r.accountFlag(fs)
 	rest, err := parse(fs, args)
 	if err != nil {
 		return exitUsage
@@ -389,7 +471,7 @@ func (r *runner) generate(ctx context.Context, cmd string, args []string) int {
 		fmt.Fprintln(r.env.Stderr, "Video is experimental: muse may block AI video for your account, or make a substitute.")
 	}
 	fmt.Fprintf(r.env.Stderr, "Asking muse for the %s (about a minute or more)...\n", cmd)
-	return r.withMuse(func(svc Service) int {
+	return r.withMuse(*account, func(svc Service) int {
 		res, err := svc.GenerateImage(ctx, req)
 		return r.finish(ctx, svc, res, err, *asJSON)
 	})
@@ -404,6 +486,7 @@ func (r *runner) speech(ctx context.Context, args []string) int {
 	fs.IntVar(&a.Speed, "speed", 0, "1 to 200, 100 is normal")
 	fs.BoolVar(&a.IgnoreScriptWarnings, "force", false, "send the script despite warnings")
 	asJSON := fs.Bool("json", false, "")
+	account := r.accountFlag(fs)
 	rest, err := parse(fs, args)
 	if err != nil {
 		return exitUsage
@@ -417,7 +500,7 @@ func (r *runner) speech(ctx context.Context, args []string) int {
 		return r.fail(err)
 	}
 	fmt.Fprintln(r.env.Stderr, "Asking muse for the voice clip (experimental, about a minute)...")
-	return r.withMuse(func(svc Service) int {
+	return r.withMuse(*account, func(svc Service) int {
 		res, err := svc.GenerateImage(ctx, req)
 		return r.finish(ctx, svc, res, err, *asJSON)
 	})
@@ -483,6 +566,7 @@ func (r *runner) chat(ctx context.Context, args []string) int {
 	fs.Var(&attach, "attach", "")
 	save := fs.String("save", "", "directory for images or videos muse sends")
 	asJSON := fs.Bool("json", false, "")
+	account := r.accountFlag(fs)
 	rest, err := parse(fs, args)
 	if err != nil {
 		return exitUsage
@@ -495,7 +579,7 @@ func (r *runner) chat(ctx context.Context, args []string) int {
 		return r.fail(err)
 	}
 	req := muse.ChatRequest{Message: strings.Join(rest, " "), ChatID: *chatID, Attachments: files, SaveImagesTo: *save}
-	return r.withMuse(func(svc Service) int {
+	return r.withMuse(*account, func(svc Service) int {
 		res, err := svc.Chat(ctx, req)
 		return r.finish(ctx, svc, res, err, *asJSON)
 	})
@@ -584,8 +668,19 @@ func size(n int) string {
 // some of them.
 func (r *runner) chats(ctx context.Context, args []string) int {
 	out := r.env.Stdout
+	fs := r.newFlags("chats")
+	account := r.accountFlag(fs)
+	args, err := parse(fs, args)
+	if err != nil {
+		return exitUsage
+	}
+	name, err := r.resolve(*account)
+	if err != nil {
+		return r.fail(err)
+	}
+	reg := r.env.Chats(name)
 	if len(args) == 0 || args[0] == "list" {
-		list := r.env.Chats.List()
+		list := reg.List()
 		if len(list) == 0 {
 			fmt.Fprintln(out, "No chats started by muse-mcp.")
 		}
@@ -603,18 +698,18 @@ func (r *runner) chats(ctx context.Context, args []string) int {
 	}
 	if args[0] == "forget" {
 		for _, id := range ids {
-			if !r.env.Chats.Known(id) {
+			if !reg.Known(id) {
 				fmt.Fprintf(out, "%s is not in the list\n", id)
 				continue
 			}
-			if err := r.env.Chats.Remove(id); err != nil {
+			if err := reg.Remove(id); err != nil {
 				return r.fail(err)
 			}
 			fmt.Fprintln(out, "Forgot chat", id, "(muse not touched)")
 		}
 		return exitOK
 	}
-	return r.withMuse(func(svc Service) int {
+	return r.withMuse(name, func(svc Service) int {
 		for _, id := range ids {
 			if err := svc.DeleteChat(ctx, id); err != nil {
 				if errors.Is(err, musepage.ErrChatUnavailable) {
@@ -676,4 +771,171 @@ func (r *runner) refs(args []string) int {
 	default:
 		return r.usageErr("unknown refs command %q", args[0])
 	}
+}
+
+// login saves the browser an account uses when asked to, then opens muse.ai
+// in it and waits for the owner to log in.
+func (r *runner) login(ctx context.Context, args []string) int {
+	fs := r.newFlags("login")
+	account := r.accountFlag(fs)
+	spec := fs.String("browser", "", "browser SPEC: local, cdp:URL or NAME:ARG")
+	cmdline := fs.String("browser-cmd", "", "a provider command line, run without a shell")
+	rest, err := parse(fs, args)
+	if err != nil {
+		return exitUsage
+	}
+	if len(rest) > 0 {
+		return r.usageErr("login takes no arguments")
+	}
+	name := *account
+	if *spec != "" || *cmdline != "" {
+		if name, err = r.saveAccount(name, *spec, *cmdline); err != nil {
+			return r.fail(err)
+		}
+	}
+	return r.withMuse(name, func(svc Service) int {
+		fmt.Fprintln(r.env.Stderr, "Opening muse.ai. If a Chrome window appears, log in there.")
+		if err := svc.Login(ctx); err != nil {
+			return r.fail(err)
+		}
+		fmt.Fprintln(r.env.Stdout, "Logged in to muse.ai.")
+		return exitOK
+	})
+}
+
+// saveAccount creates or updates an account's browser. Without a name it is
+// the default account. It returns the account's name.
+func (r *runner) saveAccount(name, spec, cmdline string) (string, error) {
+	if spec != "" && cmdline != "" {
+		return "", errors.New("give --browser or --browser-cmd, not both")
+	}
+	var command []string
+	if cmdline != "" {
+		var err error
+		if command, err = browser.SplitCommand(cmdline); err != nil {
+			return "", fmt.Errorf("--browser-cmd: %w", err)
+		}
+	}
+	bs, err := browser.ParseSpec(spec, command)
+	if err != nil {
+		return "", err
+	}
+	if err := bs.Check(); err != nil {
+		return "", err
+	}
+	f, err := r.env.Accounts.Load()
+	if err != nil {
+		return "", err
+	}
+	if name == "" {
+		name = r.account
+	}
+	if name == "" {
+		name = f.DefaultName()
+	}
+	if err := accounts.ValidName(name); err != nil {
+		return "", err
+	}
+	if r.env.Accounts == nil {
+		return "", errors.New("accounts can't be saved here")
+	}
+	f.Accounts[name] = accounts.FromSpec(bs)
+	if err := r.env.Accounts.Save(f); err != nil {
+		return "", err
+	}
+	fmt.Fprintf(r.env.Stderr, "Account %s now uses the browser %s.\n", name, bs)
+	return name, nil
+}
+
+// accounts lists, sets the default of, and removes muse accounts. It never
+// touches muse or a browser.
+func (r *runner) accounts(args []string) int {
+	out := r.env.Stdout
+	f, err := r.env.Accounts.Load()
+	if err != nil {
+		return r.fail(err)
+	}
+	if len(args) == 0 || args[0] == "list" {
+		if len(args) > 1 {
+			return r.usageErr("accounts list takes no arguments")
+		}
+		w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "\tNAME\tBROWSER")
+		def := f.DefaultName()
+		for _, n := range f.Names() {
+			a, _ := f.Get(n)
+			spec, err := a.Spec()
+			label := spec.String()
+			if err != nil {
+				label = "(invalid: " + err.Error() + ")"
+			}
+			mark := ""
+			if n == def {
+				mark = "*"
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\n", mark, n, label)
+		}
+		w.Flush()
+		return exitOK
+	}
+	switch args[0] {
+	case "default":
+		if len(args) != 2 {
+			return r.usageErr("accounts default needs one account name")
+		}
+		name, _, err := f.Resolve(args[1])
+		if err != nil {
+			return r.fail(err)
+		}
+		f.Default = name
+		if name == "default" && len(f.Accounts) == 0 {
+			f.Default = ""
+		}
+		if err := r.env.Accounts.Save(f); err != nil {
+			return r.fail(err)
+		}
+		fmt.Fprintf(out, "The default account is now %s.\n", name)
+		return exitOK
+	case "remove":
+		if len(args) != 2 {
+			return r.usageErr("accounts remove needs one account name")
+		}
+		name := args[1]
+		if _, ok := f.Accounts[name]; !ok {
+			if _, implicit := f.Get(name); implicit {
+				return r.fail(fmt.Errorf("account %q is the built-in one (Chrome on this computer); there is no entry to remove", name))
+			}
+			return r.fail(f.Unknown(name))
+		}
+		delete(f.Accounts, name)
+		wasDefault := f.Default == name
+		if wasDefault {
+			f.Default = ""
+		}
+		if err := r.env.Accounts.Save(f); err != nil {
+			return r.fail(err)
+		}
+		fmt.Fprintf(out, "Removed account %s from %s. muse, its browser and its saved state are untouched.\n", name, r.env.Accounts.Path())
+		if wasDefault {
+			fmt.Fprintf(out, "It was the default; the default account is now %s.\n", f.DefaultName())
+		}
+		return exitOK
+	}
+	return r.usageErr("accounts takes no arguments, default NAME or remove NAME")
+}
+
+// browsers lists the kinds of browser an account can use: the built-in ones
+// and the muse-browser-* providers found on PATH.
+func (r *runner) browsers(args []string) int {
+	if len(args) > 0 {
+		return r.usageErr("browsers takes no arguments")
+	}
+	w := tabwriter.NewWriter(r.env.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "local\tChrome on this computer\t(built in)")
+	fmt.Fprintln(w, "cdp\ta browser at a DevTools address you give\t(built in)")
+	for _, p := range browser.Discover() {
+		fmt.Fprintf(w, "%s\t%s\t(%s%s, on PATH)\n", p.Name, p.Description, browser.ProviderPrefix, p.Name)
+	}
+	w.Flush()
+	return exitOK
 }
