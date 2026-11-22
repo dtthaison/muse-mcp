@@ -55,3 +55,10 @@ func ChromePath() string {
 	}
 	return defaultChrome
 }
+
+// RemoteURL is MUSE_CDP_URL: the DevTools address of a Chrome that runs
+// already (http://host:port or ws://host:port/devtools/browser/ID). When set,
+// muse-mcp attaches to it instead of starting its own Chrome.
+func RemoteURL() string {
+	return os.Getenv("MUSE_CDP_URL")
+}

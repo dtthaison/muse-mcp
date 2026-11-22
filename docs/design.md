@@ -225,7 +225,10 @@ results.
   binary: `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`, else
   `google-chrome` or `chromium` on `PATH`; override with the `MUSE_CHROME`
   environment variable.
-- No remote-debugging port: chromedp talks to Chrome over a pipe
+- Opt-in remote mode: `MUSE_CDP_URL` attaches to a Chrome that runs already
+  (chromedp's `remote` allocator). muse-mcp then launches nothing, never closes
+  that browser (it drops the connection only), and `SetVisible` changes nothing.
+- No remote-debugging port of our own: chromedp talks to Chrome over a pipe
   (`--remote-debugging-pipe`), and `TestNoDebuggingPort` checks that Chrome
   writes no `DevToolsActivePort`.
 - A lock file in `~/.muse-mcp/` keeps a second `muse-mcp` (for example a second

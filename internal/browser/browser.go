@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/chromedp/chromedp"
+	"github.com/chromedp/chromedp/remote"
 )
 
 var ErrLocked = errors.New("another muse-mcp (another Claude Code session or a muse-mcp command) is using your muse login; use muse there or quit it, then try again")
@@ -22,6 +23,11 @@ type Options struct {
 	// LockLater takes the lock when Chrome first starts instead of in New,
 	// so a server that never uses muse doesn't keep others out.
 	LockLater bool
+	// RemoteURL, when set, attaches to a Chrome that runs already (for example
+	// a ShardX profile reached through an SSH tunnel) instead of starting one.
+	// muse-mcp then never closes that browser, and the window is whatever the
+	// owner of that browser shows, so SetVisible does not relaunch anything.
+	RemoteURL string
 }
 
 // Browser starts Chrome lazily and relaunches it when it has died or when the
@@ -98,7 +104,7 @@ func (b *Browser) SetVisible(visible bool) error {
 		return nil
 	}
 	b.visible = visible
-	if !b.runningLocked() {
+	if b.opts.RemoteURL != "" || !b.runningLocked() {
 		return nil
 	}
 	b.stopLocked()
@@ -155,6 +161,18 @@ func (b *Browser) launchLocked() error {
 	if err := b.lockLocked(); err != nil {
 		return err
 	}
+	if b.opts.RemoteURL != "" {
+		allocCtx, cancelAlloc := remote.NewAllocator(context.Background(), b.opts.RemoteURL)
+		browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
+		if err := chromedp.Do(browserCtx); err != nil {
+			cancelBrowser()
+			cancelAlloc()
+			return fmt.Errorf("connecting to the browser at %s: %w", b.opts.RemoteURL, err)
+		}
+		b.cancelAlloc, b.browserCtx, b.cancelBrowser = cancelAlloc, browserCtx, cancelBrowser
+		b.gen++
+		return nil
+	}
 	// chromedp talks to Chrome over a pipe; a remote-debugging port or address
 	// flag would open a port other programs could attach to.
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
@@ -187,7 +205,8 @@ func (b *Browser) stopLocked() {
 	if b.browserCtx == nil {
 		return
 	}
-	if b.browserCtx.Err() == nil {
+	// An attached browser belongs to someone else: drop the connection only.
+	if b.opts.RemoteURL == "" && b.browserCtx.Err() == nil {
 		chromedp.Cancel(b.browserCtx) // closes Chrome gracefully
 	}
 	b.cancelBrowser()

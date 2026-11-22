@@ -85,7 +85,7 @@ func startMuse(paths config.Paths, log *slog.Logger) (cli.Service, func(), error
 	if err != nil {
 		return nil, nil, err
 	}
-	br, err := browser.New(browser.Options{ExecPath: exe, ProfileDir: paths.Profile, LockPath: paths.Lock})
+	br, err := browser.New(browser.Options{ExecPath: exe, ProfileDir: paths.Profile, LockPath: paths.Lock, RemoteURL: config.RemoteURL()})
 	if errors.Is(err, browser.ErrLocked) {
 		return nil, nil, errors.New("another muse-mcp (probably a Claude Code session) is using your muse login; use the muse tools there, or quit it first")
 	}
@@ -116,7 +116,7 @@ func serve(ctx context.Context, paths config.Paths, log *slog.Logger, lib *libra
 	exe, findErr := browser.FindChrome()
 	// The lock is taken on the first muse call, so a session that never uses
 	// muse doesn't keep the CLI or other sessions out.
-	br, err := browser.New(browser.Options{ExecPath: exe, ProfileDir: paths.Profile, LockPath: paths.Lock, LockLater: true})
+	br, err := browser.New(browser.Options{ExecPath: exe, ProfileDir: paths.Profile, LockPath: paths.Lock, LockLater: true, RemoteURL: config.RemoteURL()})
 	switch {
 	case err != nil:
 		return err

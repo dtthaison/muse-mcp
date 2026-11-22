@@ -327,6 +327,18 @@ Everything lives in `~/.muse-mcp/` (override with `MUSE_MCP_HOME`):
 `voices.csv` (a voice catalog you imported, if any), `chats.json` (the chats muse-mcp
 started), `muse-mcp.log`.
 
+## Using a browser that runs elsewhere
+
+Set `MUSE_CDP_URL` to the DevTools address of a Chrome that already runs
+(`http://127.0.0.1:9222` or `ws://…/devtools/browser/…`) and muse-mcp attaches to
+it instead of starting its own Chrome, for example a profile in an anti-detect
+browser on another machine, reached through an SSH tunnel. Log in to muse in that
+browser's own window (`muse-mcp login` opens muse.ai there and waits). muse-mcp
+never closes that browser; the hidden or visible window is up to whoever shows
+it. Give each account its own `MUSE_MCP_HOME`, so their chats, references and
+lock stay apart. The DevTools port gives full control of that browser: keep it
+on localhost and tunnel it, never expose it.
+
 ## Development
 
 ```sh
