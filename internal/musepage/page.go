@@ -11,7 +11,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
+	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -195,7 +199,7 @@ func Attach(ctx context.Context, files []string) error {
 	if err != nil {
 		return err
 	}
-	if err := chromedp.Do(ctx, chromedp.SetUploadFiles(chromedp.CSS(selFileInput), files)); err != nil {
+	if err := putFiles(ctx, files); err != nil {
 		return fmt.Errorf("attaching files: %w", err)
 	}
 	deadline := time.Now().Add(15 * time.Second)
@@ -210,6 +214,67 @@ func Attach(ctx context.Context, files []string) error {
 	}
 	return fmt.Errorf("muse did not accept the %d attached file(s)", len(files))
 }
+
+// attachChunk is how many bytes of a file go to the page per CDP call.
+const attachChunk = 512 << 10
+
+// putFiles reads the files here and hands their bytes to the page, which
+// builds File objects and sets them on muse's file input. CDP's
+// SetFileInputFiles takes paths on the browser's machine, so it fails when the
+// browser runs elsewhere (a cdp: URL or a provider such as ShardX); sending the
+// bytes works for a local and a remote browser alike.
+func putFiles(ctx context.Context, files []string) error {
+	if _, err := chromedp.Run(ctx, chromedp.Evaluate[bool](`(window.__museAttach = [], true)`)); err != nil {
+		return err
+	}
+	for i, path := range files {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		typ := mime.TypeByExtension(strings.ToLower(filepath.Ext(path)))
+		if typ == "" {
+			typ = http.DetectContentType(data)
+		}
+		head := fmt.Sprintf(`(window.__museAttach[%d] = {name: %s, type: %s, parts: []}, true)`, i, q(filepath.Base(path)), q(typ))
+		if _, err := chromedp.Run(ctx, chromedp.Evaluate[bool](head)); err != nil {
+			return err
+		}
+		for off := 0; off < len(data); off += attachChunk {
+			end := min(off+attachChunk, len(data))
+			js := fmt.Sprintf(`(window.__museAttach[%d].parts.push(%q), true)`, i, base64.StdEncoding.EncodeToString(data[off:end]))
+			if _, err := chromedp.Run(ctx, chromedp.Evaluate[bool](js)); err != nil {
+				return err
+			}
+		}
+	}
+	res, err := chromedp.Run(ctx, chromedp.Evaluate[string](setFilesJS))
+	if err != nil {
+		return err
+	}
+	if res != "ok" {
+		return errors.New(res)
+	}
+	return nil
+}
+
+// setFilesJS turns window.__museAttach into Files on the file input and fires
+// the events muse listens for.
+var setFilesJS = fmt.Sprintf(`(() => {
+  const list = window.__museAttach || [];
+  delete window.__museAttach;
+  const input = document.querySelector(%s);
+  if (!input) return 'muse has no file input on this page';
+  const dt = new DataTransfer();
+  for (const f of list) {
+    const parts = f.parts.map(b => Uint8Array.from(atob(b), c => c.charCodeAt(0)));
+    dt.items.add(new File(parts, f.name, {type: f.type}));
+  }
+  input.files = dt.files;
+  input.dispatchEvent(new Event('input', {bubbles: true}));
+  input.dispatchEvent(new Event('change', {bubbles: true}));
+  return 'ok';
+})()`, q(selFileInput))
 
 // clickSendJS looks for the send button near the chat box (muse's is within
 // 5 levels of the textarea), never inside an approval card: a card button
